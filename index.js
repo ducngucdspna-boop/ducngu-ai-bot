@@ -32,7 +32,7 @@ async function askGroq(promptText) {
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       {
-        model: 'llama-3.3-70b-versatile',
+        model: 'llama-3.1-8b-instant', // Đã cập nhật model chuẩn, tốc độ phản hồi cực nhanh
         messages: [
           { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },
           { role: 'user', content: promptText }
