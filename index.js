@@ -32,7 +32,7 @@ async function askGroq(promptText) {
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       {
-        model: 'openai/gpt-oss-20b', // Sử dụng mô hình OpenAI mã nguồn mở chạy trên Groq
+        model: 'openai/gpt-oss-20b',
         messages: [
           { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },
           { role: 'user', content: promptText }
@@ -77,6 +77,27 @@ async function sendPhoto(chatId, userPrompt) {
   }
 }
 
+// Hàm gửi video từ Pollinations AI
+async function sendVideo(chatId, userPrompt) {
+  try {
+    const translatePrompt = `Translate this video description into a concise English prompt for video generation. Output ONLY the translated English text, no explanation: "${userPrompt}"`;
+    const translationResult = await askGroq(translatePrompt);
+    let englishPrompt = translationResult.text || userPrompt;
+
+    // Đường dẫn tạo video ngắn qua Pollinations AI
+    const videoUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(englishPrompt)}?model=luma&seed=${Math.floor(Math.random() * 1000000)}`;
+
+    await axios.post(`${TELEGRAM_API}/sendVideo`, {
+      chat_id: chatId,
+      video: videoUrl,
+      caption: `🎬 Video tạo theo yêu cầu: "${userPrompt}"`
+    });
+  } catch (err) {
+    console.error('Lỗi tạo video:', err.message);
+    await sendMessage(chatId, "❌ Không thể tạo video lúc này, hoặc việc khởi tạo tốn quá nhiều thời gian. Vui lòng thử lại sau!");
+  }
+}
+
 // Route nhận Webhook
 app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
@@ -89,7 +110,13 @@ app.post('/webhook', async (req, res) => {
 
   try {
     if (userText.startsWith('/start')) {
-      await sendMessage(chatId, "👋 Chào mừng bạn! Hãy nhắn tin bất kỳ để trò chuyện với AI, hoặc dùng lệnh /image <mô tả> để tạo ảnh.");
+      await sendMessage(
+        chatId, 
+        "👋 Chào mừng bạn!\n\n" +
+        "• Nhắn tin bất kỳ để chat với AI.\n" +
+        "• Dùng lệnh `/image <mô tả>` để tạo ảnh.\n" +
+        "• Dùng lệnh `/video <mô tả>` để tạo video AI ngắn."
+      );
     } else if (userText.startsWith('/image')) {
       const prompt = userText.replace('/image', '').trim();
       if (!prompt) {
@@ -97,6 +124,14 @@ app.post('/webhook', async (req, res) => {
       } else {
         await sendMessage(chatId, "⏳ Đang tạo ảnh chất lượng cao, vui lòng đợi giây lát...");
         await sendPhoto(chatId, prompt);
+      }
+    } else if (userText.startsWith('/video')) {
+      const prompt = userText.replace('/video', '').trim();
+      if (!prompt) {
+        await sendMessage(chatId, "⚠️ Vui lòng nhập mô tả sau lệnh /video. Ví dụ: /video con mèo đang chạy trên cỏ");
+      } else {
+        await sendMessage(chatId, "⏳ Đang khởi tạo video AI (tạo video sẽ mất khoảng 30s - 1 phút), vui lòng kiên nhẫn đợi nhé...");
+        await sendVideo(chatId, prompt);
       }
     } else {
       // Trò chuyện bằng Groq AI
