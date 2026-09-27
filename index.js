@@ -11,7 +11,7 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 // Khởi tạo SDK Gemini AI
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash-latest' });
 
 // Hàm gửi tin nhắn Telegram
 async function sendMessage(chatId, text) {
