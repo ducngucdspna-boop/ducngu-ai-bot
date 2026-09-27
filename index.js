@@ -5,7 +5,7 @@ const app = express();
 app.use(express.json());
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 // Hàm gửi tin nhắn Telegram
@@ -20,31 +20,38 @@ async function sendMessage(chatId, text) {
   }
 }
 
-// Hàm gọi Gemini AI chuẩn
-async function askGemini(promptText) {
-  const models = ['gemini-1.5-flash', 'gemini-1.5-pro'];
-
-  for (const model of models) {
-    try {
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
-      const response = await axios.post(geminiUrl, {
-        contents: [{ parts: [{ text: promptText }] }]
-      });
-      const reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-      if (reply) return reply.trim();
-    } catch (err) {
-      console.error(`Thử model ${model} thất bại:`, err.response?.data?.error?.message || err.message);
-    }
+// Hàm gọi Groq AI (Llama 3.3 70B)
+async function askGroq(promptText) {
+  try {
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: 'llama-3.3-70b-versatile',
+        messages: [
+          { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },
+          { role: 'user', content: promptText }
+        ],
+        temperature: 0.7
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${GROQ_API_KEY}`,
+          'Content-Type': 'application/json'
+        }
+      }
+    );
+    return response.data?.choices?.[0]?.message?.content?.trim();
+  } catch (err) {
+    console.error('Lỗi Groq API:', err.response?.data || err.message);
+    return null;
   }
-  return null;
 }
 
-// Hàm gửi ảnh từ Pollinations AI
+// Hàm gửi ảnh từ Pollinations AI (Tự dịch prompt bằng Groq)
 async function sendPhoto(chatId, userPrompt) {
   try {
-    // Dịch prompt tiếng Việt sang tiếng Anh
-    const translatePrompt = `Translate this image description into a clear English prompt for image generation. Return ONLY the English translation, no other text: "${userPrompt}"`;
-    let englishPrompt = await askGemini(translatePrompt);
+    const translatePrompt = `Translate this image description into a concise English prompt for image generation. Output ONLY the translated English text, no explanation: "${userPrompt}"`;
+    let englishPrompt = await askGroq(translatePrompt);
 
     if (!englishPrompt) {
       englishPrompt = userPrompt;
@@ -76,7 +83,7 @@ app.post('/webhook', async (req, res) => {
 
   try {
     if (userText.startsWith('/start')) {
-      await sendMessage(chatId, "👋 Chào mừng bạn! Hãy nhắn tin bất kỳ để trò chuyện với AI, hoặc dùng lệnh /image <mô tả> để tạo ảnh.");
+      await sendMessage(chatId, "👋 Chào mừng bạn! Hãy nhắn tin bất kỳ để trò chuyện với AI (Groq/Llama 3), hoặc dùng lệnh /image <mô tả> để tạo ảnh.");
     } else if (userText.startsWith('/image')) {
       const prompt = userText.replace('/image', '').trim();
       if (!prompt) {
@@ -86,12 +93,12 @@ app.post('/webhook', async (req, res) => {
         await sendPhoto(chatId, prompt);
       }
     } else {
-      // Trò chuyện văn bản thường
-      const reply = await askGemini(userText);
+      // Trò chuyện văn bản bằng Groq AI
+      const reply = await askGroq(userText);
       if (reply) {
         await sendMessage(chatId, reply);
       } else {
-        await sendMessage(chatId, "🤖 AI đang bận hoặc Key chưa sẵn sàng, vui lòng thử lại sau!");
+        await sendMessage(chatId, "🤖 AI đang bận, vui lòng thử lại sau!");
       }
     }
   } catch (error) {
@@ -106,5 +113,5 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Server đang lắng nghe tại port ${PORT}`);
+  console.log(`Server đang lắng hệ tại port ${PORT}`);
 });
