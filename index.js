@@ -20,7 +20,7 @@ async function sendMessage(chatId, text) {
   }
 }
 
-// Hàm gọi Groq AI
+// Hàm gọi Groq AI với model OpenAI (gpt-oss-20b) đang hoạt động chuẩn nhất
 async function askGroq(promptText) {
   if (!GROQ_API_KEY) {
     return { error: "Chưa cấu hình GROQ_API_KEY trên Render!" };
@@ -32,7 +32,7 @@ async function askGroq(promptText) {
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       {
-        model: 'llama-3.1-8b-instant', // Sử dụng model Llama 3.1 8B siêu nhanh và ổn định
+        model: 'openai/gpt-oss-20b', // Sử dụng model OpenAI đang chạy chuẩn trên tài khoản của bạn
         messages: [
           { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },
           { role: 'user', content: promptText }
@@ -77,14 +77,13 @@ async function sendPhoto(chatId, userPrompt) {
   }
 }
 
-// Hàm gửi video từ Pollinations AI (Đã sửa đường dẫn chuẩn tạo video MP4)
+// Hàm gửi video từ Pollinations AI (Định dạng video MP4)
 async function sendVideo(chatId, userPrompt) {
   try {
     const translatePrompt = `Translate this video description into a concise English prompt for video generation. Output ONLY the translated English text, no explanation: "${userPrompt}"`;
     const translationResult = await askGroq(translatePrompt);
     let englishPrompt = translationResult.text || userPrompt;
 
-    // Sử dụng endpoint video chính thức của Pollinations AI để xuất file video MP4
     const videoUrl = `https://video.pollinations.ai/prompt/${encodeURIComponent(englishPrompt)}?seed=${Math.floor(Math.random() * 1000000)}`;
 
     await axios.post(`${TELEGRAM_API}/sendVideo`, {
