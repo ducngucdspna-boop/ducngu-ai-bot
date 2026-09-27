@@ -56,26 +56,40 @@ app.post('/webhook', async (req, res) => {
         await sendPhoto(chatId, prompt);
       }
     } else {
-      // Gọi REST API của Gemini 1.5 Flash
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-      
-      const response = await axios.post(geminiUrl, {
-        contents: [{ parts: [{ text: userText }] }]
-      });
+      // Danh sách các model để tự động chọn nếu model đầu tiên không khả dụng
+      const candidateModels = [
+        'gemini-1.5-flash-latest',
+        'gemini-1.5-flash',
+        'gemini-pro'
+      ];
 
-      const reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      let reply = null;
+      let lastError = null;
+
+      for (const modelName of candidateModels) {
+        try {
+          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
+          const response = await axios.post(geminiUrl, {
+            contents: [{ parts: [{ text: userText }] }]
+          });
+          reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+          if (reply) break;
+        } catch (err) {
+          lastError = err;
+        }
+      }
 
       if (reply) {
         await sendMessage(chatId, reply);
       } else {
-        await sendMessage(chatId, "🤖 AI không đưa ra phản hồi, thử lại nhé!");
+        const errObj = lastError?.response?.data?.error;
+        const msg = errObj ? `[${errObj.code}] ${errObj.message}` : (lastError?.message || 'Không xác định');
+        await sendMessage(chatId, `❌ Lỗi Gemini: ${msg}`);
       }
     }
   } catch (error) {
-    console.error("Lỗi Gemini AI:", error.response?.data || error.message);
-    const errObj = error.response?.data?.error;
-    const msg = errObj ? `[${errObj.code}] ${errObj.message}` : error.message;
-    await sendMessage(chatId, `❌ Lỗi Gemini: ${msg}`);
+    console.error("Lỗi xử lý:", error.message);
+    await sendMessage(chatId, `❌ Lỗi hệ thống: ${error.message}`);
   }
 });
 
