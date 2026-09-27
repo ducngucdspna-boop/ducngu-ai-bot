@@ -79,44 +79,31 @@ async function sendPhoto(chatId, userPrompt) {
   }
 }
 
-// Hàm gửi video ngắn từ Pollinations AI (Kiểm tra định dạng MP4 để tránh gửi nhầm ảnh)
+// Hàm gửi video ngắn từ Pollinations AI
 async function sendVideo(chatId, userPrompt) {
   try {
     const translatePrompt = `Translate this video description into a concise English prompt for video generation. Output ONLY the translated English text, no explanation: "${userPrompt}"`;
     const translationResult = await askGroq(translatePrompt);
     let englishPrompt = translationResult.text || userPrompt;
 
-    // Endpoint render video của Pollinations
-    const videoUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(englishPrompt)}?model=cogvideox&width=512&height=512&seed=${Math.floor(Math.random() * 1000000)}&video=true`;
+    // Tối ưu prompt tạo video ngắn gọn nhẹ
+    const videoUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(englishPrompt)}?model=cogvideox&width=512&height=512&seed=${Math.floor(Math.random() * 1000000)}`;
 
-    // Tải dữ liệu về để kiểm tra định dạng trước khi gửi
-    const response = await axios.get(videoUrl, { timeout: 120000, responseType: 'arraybuffer' });
-    const contentType = response.headers['content-type'] || '';
-
-    // Nếu server trả về ảnh JPG/PNG thay vì MP4 thì báo lỗi không gửi
-    if (!contentType.includes('video') && !contentType.includes('mp4')) {
-      await sendMessage(chatId, "⚠️ Server tạo video miễn phí hiện đang bị quá tải nên không thể render dạng MP4. Bạn vui lòng thử lại sau hoặc chuyển sang dùng lệnh /image nhé!");
-      return;
-    }
-
-    // Gửi đúng file video MP4 sang Telegram
-    const form = new FormData();
-    form.append('chat_id', chatId);
-    form.append('video', Buffer.from(response.data), { filename: 'video.mp4', contentType: 'video/mp4' });
-    form.append('caption', `🎬 Video tạo theo yêu cầu: "${userPrompt}"`);
-
-    await axios.post(`${TELEGRAM_API}/sendVideo`, form, {
-      headers: form.getHeaders(),
-      timeout: 60000
+    // Gửi URL video trực tiếp sang Telegram
+    await axios.post(`${TELEGRAM_API}/sendVideo`, {
+      chat_id: chatId,
+      video: videoUrl,
+      caption: `🎬 Video tạo theo yêu cầu: "${userPrompt}"`
+    }, {
+      timeout: 120000 // Tăng timeout lên 2 phút
     });
-
   } catch (err) {
-    console.error('Lỗi tạo video:', err.message);
-    await sendMessage(chatId, "❌ Máy chủ tạo video miễn phí đang quá tải hoặc hết băng thông. Bạn vui lòng thử lại sau ít phút nhé!");
+    console.error('Lỗi tạo video:', err.response?.data || err.message);
+    await sendMessage(chatId, "❌ Server tạo video miễn phí Pollinations đang quá tải hoặc hết băng thông tạm thời. Vui lòng thử lại sau ít phút hoặc dùng lệnh /image để tạo ảnh nhé!");
   }
 }
 
-// Route nhận Webhook từ Telegram
+// Route nhận Webhook
 app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 
