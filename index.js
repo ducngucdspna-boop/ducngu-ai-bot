@@ -32,7 +32,7 @@ async function askGroq(promptText) {
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       {
-        model: 'openai/gpt-oss-20b',
+        model: 'llama-3.1-8b-instant', // Sử dụng model Llama 3.1 8B siêu nhanh và ổn định
         messages: [
           { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },
           { role: 'user', content: promptText }
@@ -77,15 +77,15 @@ async function sendPhoto(chatId, userPrompt) {
   }
 }
 
-// Hàm gửi video từ Pollinations AI
+// Hàm gửi video từ Pollinations AI (Đã sửa đường dẫn chuẩn tạo video MP4)
 async function sendVideo(chatId, userPrompt) {
   try {
     const translatePrompt = `Translate this video description into a concise English prompt for video generation. Output ONLY the translated English text, no explanation: "${userPrompt}"`;
     const translationResult = await askGroq(translatePrompt);
     let englishPrompt = translationResult.text || userPrompt;
 
-    // Đường dẫn tạo video ngắn qua Pollinations AI
-    const videoUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(englishPrompt)}?model=luma&seed=${Math.floor(Math.random() * 1000000)}`;
+    // Sử dụng endpoint video chính thức của Pollinations AI để xuất file video MP4
+    const videoUrl = `https://video.pollinations.ai/prompt/${encodeURIComponent(englishPrompt)}?seed=${Math.floor(Math.random() * 1000000)}`;
 
     await axios.post(`${TELEGRAM_API}/sendVideo`, {
       chat_id: chatId,
@@ -94,7 +94,7 @@ async function sendVideo(chatId, userPrompt) {
     });
   } catch (err) {
     console.error('Lỗi tạo video:', err.message);
-    await sendMessage(chatId, "❌ Không thể tạo video lúc này, hoặc việc khởi tạo tốn quá nhiều thời gian. Vui lòng thử lại sau!");
+    await sendMessage(chatId, "❌ Không thể tạo video lúc này (API video free có thể bận/timeout). Vui lòng thử lại sau ít phút!");
   }
 }
 
@@ -130,7 +130,7 @@ app.post('/webhook', async (req, res) => {
       if (!prompt) {
         await sendMessage(chatId, "⚠️ Vui lòng nhập mô tả sau lệnh /video. Ví dụ: /video con mèo đang chạy trên cỏ");
       } else {
-        await sendMessage(chatId, "⏳ Đang khởi tạo video AI (tạo video sẽ mất khoảng 30s - 1 phút), vui lòng kiên nhẫn đợi nhé...");
+        await sendMessage(chatId, "⏳ Đang khởi tạo video AI (tiến trình render mất từ 30s - 1 phút), vui lòng kiên nhẫn đợi nhé...");
         await sendVideo(chatId, prompt);
       }
     } else {
