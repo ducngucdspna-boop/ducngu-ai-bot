@@ -1,6 +1,5 @@
 const express = require('express');
 const axios = require('axios');
-const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 app.use(express.json());
@@ -8,10 +7,6 @@ app.use(express.json());
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
-
-// Khởi tạo SDK Gemini AI
-const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
-const model = genAI.getGenerativeModel({ model: 'gemini-pro' });
 
 // Hàm gửi tin nhắn Telegram
 async function sendMessage(chatId, text) {
@@ -41,7 +36,7 @@ async function sendPhoto(chatId, prompt) {
 
 // Route nhận Webhook
 app.post('/webhook', async (req, res) => {
-  res.sendStatus(200); // Trả về 200 OK ngay lập tức cho Telegram
+  res.sendStatus(200);
 
   const message = req.body?.message;
   if (!message || !message.text) return;
@@ -61,10 +56,14 @@ app.post('/webhook', async (req, res) => {
         await sendPhoto(chatId, prompt);
       }
     } else {
-      // Gọi Gemini qua SDK chính thức
-      const result = await model.generateContent(userText);
-      const response = await result.response;
-      const reply = response.text();
+      // Gọi trực tiếp REST API của Gemini
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+      
+      const response = await axios.post(geminiUrl, {
+        contents: [{ parts: [{ text: userText }] }]
+      });
+
+      const reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
 
       if (reply) {
         await sendMessage(chatId, reply);
@@ -73,10 +72,10 @@ app.post('/webhook', async (req, res) => {
       }
     }
   } catch (error) {
-    console.error("Lỗi xử lý Gemini AI:", error);
-    // In trực tiếp thông báo lỗi ngắn về Telegram để dễ phát hiện nguyên nhân
-    const errorDetails = error?.message || "Không xác định";
-    await sendMessage(chatId, `❌ Lỗi kết nối Gemini: ${errorDetails}`);
+    console.error("Lỗi Gemini AI:", error.response?.data || error.message);
+    const errObj = error.response?.data?.error;
+    const msg = errObj ? `[${errObj.code}] ${errObj.message}` : error.message;
+    await sendMessage(chatId, `❌ Lỗi Gemini: ${msg}`);
   }
 });
 
