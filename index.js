@@ -12,6 +12,7 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 // Khởi tạo SDK Gemini AI
 const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
 const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
+
 // Hàm gửi tin nhắn Telegram
 async function sendMessage(chatId, text) {
   try {
@@ -40,7 +41,7 @@ async function sendPhoto(chatId, prompt) {
 
 // Route nhận Webhook
 app.post('/webhook', async (req, res) => {
-  res.sendStatus(200); // Trả về 200 OK ngay lập tức
+  res.sendStatus(200); // Trả về 200 OK ngay lập tức cho Telegram
 
   const message = req.body?.message;
   if (!message || !message.text) return;
@@ -62,7 +63,8 @@ app.post('/webhook', async (req, res) => {
     } else {
       // Gọi Gemini qua SDK chính thức
       const result = await model.generateContent(userText);
-      const reply = result.response.text();
+      const response = await result.response;
+      const reply = response.text();
 
       if (reply) {
         await sendMessage(chatId, reply);
@@ -72,7 +74,9 @@ app.post('/webhook', async (req, res) => {
     }
   } catch (error) {
     console.error("Lỗi xử lý Gemini AI:", error);
-    await sendMessage(chatId, "❌ Đã xảy ra lỗi khi kết nối với AI Gemini!");
+    // In trực tiếp thông báo lỗi ngắn về Telegram để dễ phát hiện nguyên nhân
+    const errorDetails = error?.message || "Không xác định";
+    await sendMessage(chatId, `❌ Lỗi kết nối Gemini: ${errorDetails}`);
   }
 });
 
