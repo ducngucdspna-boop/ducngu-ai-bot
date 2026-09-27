@@ -56,8 +56,8 @@ app.post('/webhook', async (req, res) => {
         await sendPhoto(chatId, prompt);
       }
     } else {
-      // Gọi trực tiếp REST API của Gemini
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
+      // Gọi trực tiếp REST API của Gemini với model gemini-pro
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-pro:generateContent?key=${GEMINI_API_KEY}`;
       
       const response = await axios.post(geminiUrl, {
         contents: [{ parts: [{ text: userText }] }]
