@@ -20,47 +20,39 @@ async function sendMessage(chatId, text) {
   }
 }
 
-// Hàm gọi Gemini để xử lý văn bản
+// Hàm gọi Gemini AI chuẩn
 async function askGemini(promptText) {
-  const candidateModels = [
-    'gemini-1.5-flash-latest',
-    'gemini-1.5-flash',
-    'gemini-pro'
-  ];
+  const models = ['gemini-1.5-flash', 'gemini-1.5-pro'];
 
-  for (const modelName of candidateModels) {
+  for (const model of models) {
     try {
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${GEMINI_API_KEY}`;
       const response = await axios.post(geminiUrl, {
         contents: [{ parts: [{ text: promptText }] }]
       });
       const reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (reply) return reply.trim();
     } catch (err) {
-      // Tiếp tục thử model tiếp theo nếu lỗi
+      console.error(`Thử model ${model} thất bại:`, err.response?.data?.error?.message || err.message);
     }
   }
   return null;
 }
 
-// Hàm gửi ảnh từ Pollinations AI (Tự động dịch prompt sang Tiếng Anh)
+// Hàm gửi ảnh từ Pollinations AI
 async function sendPhoto(chatId, userPrompt) {
   try {
-    // 1. Nhờ Gemini dịch và tối ưu prompt tiếng Việt thành prompt tiếng Anh chuẩn
-    const translateSystemInstruction = `Translate the following image description into a concise, detailed English prompt suitable for AI image generation (Flux model). Output ONLY the English prompt text, nothing else: "${userPrompt}"`;
-    
-    let englishPrompt = await askGemini(translateSystemInstruction);
+    // Dịch prompt tiếng Việt sang tiếng Anh
+    const translatePrompt = `Translate this image description into a clear English prompt for image generation. Return ONLY the English translation, no other text: "${userPrompt}"`;
+    let englishPrompt = await askGemini(translatePrompt);
 
-    // Nếu Gemini bận, dùng trực tiếp prompt của người dùng
     if (!englishPrompt) {
       englishPrompt = userPrompt;
     }
 
-    // 2. Thêm từ khóa tăng chất lượng ảnh
     const finalPrompt = `${englishPrompt}, photorealistic, highly detailed, 8k resolution`;
     const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?model=flux&width=1024&height=1024&nologo=true&seed=${Math.floor(Math.random() * 1000000)}`;
 
-    // 3. Gửi ảnh về Telegram
     await axios.post(`${TELEGRAM_API}/sendPhoto`, {
       chat_id: chatId,
       photo: imageUrl,
@@ -88,22 +80,22 @@ app.post('/webhook', async (req, res) => {
     } else if (userText.startsWith('/image')) {
       const prompt = userText.replace('/image', '').trim();
       if (!prompt) {
-        await sendMessage(chatId, "⚠️ Vui lòng nhập mô tả sau lệnh /image. Ví dụ: /image con chó golden chạy trên đồng cỏ");
+        await sendMessage(chatId, "⚠️ Vui lòng nhập mô tả sau lệnh /image. Ví dụ: /image con chó golden");
       } else {
-        await sendMessage(chatId, "⏳ Đang tối ưu mô tả và tạo ảnh chất lượng cao, vui lòng đợi giây lát...");
+        await sendMessage(chatId, "⏳ Đang tạo ảnh chất lượng cao, vui lòng đợi giây lát...");
         await sendPhoto(chatId, prompt);
       }
     } else {
-      // Trò chuyện bằng Gemini
+      // Trò chuyện văn bản thường
       const reply = await askGemini(userText);
       if (reply) {
         await sendMessage(chatId, reply);
       } else {
-        await sendMessage(chatId, "🤖 AI chưa thể phản hồi lúc này, bạn vui lòng thử lại sau nhé!");
+        await sendMessage(chatId, "🤖 AI đang bận hoặc Key chưa sẵn sàng, vui lòng thử lại sau!");
       }
     }
   } catch (error) {
-    console.error("Lỗi xử lý:", error.message);
+    console.error("Lỗi hệ thống:", error.message);
     await sendMessage(chatId, `❌ Lỗi hệ thống: ${error.message}`);
   }
 });
