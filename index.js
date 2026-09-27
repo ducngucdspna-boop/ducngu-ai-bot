@@ -79,33 +79,27 @@ async function sendPhoto(chatId, userPrompt) {
   }
 }
 
-// Hàm gửi video từ Pollinations AI (Đã sửa lỗi Timeout & gửi file dạng Buffer)
+// Hàm gửi video ngắn từ Pollinations AI
 async function sendVideo(chatId, userPrompt) {
   try {
     const translatePrompt = `Translate this video description into a concise English prompt for video generation. Output ONLY the translated English text, no explanation: "${userPrompt}"`;
     const translationResult = await askGroq(translatePrompt);
     let englishPrompt = translationResult.text || userPrompt;
 
-    const videoUrl = `https://video.pollinations.ai/prompt/${encodeURIComponent(englishPrompt)}?seed=${Math.floor(Math.random() * 1000000)}`;
+    // Tối ưu prompt tạo video ngắn gọn nhẹ
+    const videoUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(englishPrompt)}?model=cogvideox&width=512&height=512&seed=${Math.floor(Math.random() * 1000000)}`;
 
-    // Tải video dạng stream với timeout 90s
-    const videoStream = await axios.get(videoUrl, {
-      responseType: 'stream',
-      timeout: 90000
-    });
-
-    const formData = new FormData();
-    formData.append('chat_id', chatId);
-    formData.append('caption', `🎬 Video tạo theo yêu cầu: "${userPrompt}"`);
-    formData.append('video', videoStream.data, { filename: 'video.mp4' });
-
-    await axios.post(`${TELEGRAM_API}/sendVideo`, formData, {
-      headers: formData.getHeaders(),
-      timeout: 90000
+    // Gửi URL video trực tiếp sang Telegram
+    await axios.post(`${TELEGRAM_API}/sendVideo`, {
+      chat_id: chatId,
+      video: videoUrl,
+      caption: `🎬 Video tạo theo yêu cầu: "${userPrompt}"`
+    }, {
+      timeout: 120000 // Tăng timeout lên 2 phút
     });
   } catch (err) {
     console.error('Lỗi tạo video:', err.response?.data || err.message);
-    await sendMessage(chatId, "❌ Máy chủ tạo video miễn phí đang bận hoặc thời gian render quá lâu (timeout). Vui lòng thử lại sau ít phút!");
+    await sendMessage(chatId, "❌ Server tạo video miễn phí Pollinations đang quá tải hoặc hết băng thông tạm thời. Vui lòng thử lại sau ít phút hoặc dùng lệnh /image để tạo ảnh nhé!");
   }
 }
 
@@ -114,10 +108,10 @@ app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 
   const message = req.body?.message;
-  if (!message || !message.text) return;
+  if (!message) return;
 
   const chatId = message.chat.id;
-  const userText = message.text.trim();
+  const userText = message.text ? message.text.trim() : '';
 
   try {
     if (userText.startsWith('/start')) {
@@ -141,10 +135,10 @@ app.post('/webhook', async (req, res) => {
       if (!prompt) {
         await sendMessage(chatId, "⚠️ Vui lòng nhập mô tả sau lệnh /video. Ví dụ: /video con mèo đang chạy trên cỏ");
       } else {
-        await sendMessage(chatId, "⏳ Đang khởi tạo video AI (tiến trình render mất khoảng 30s - 1 phút), vui lòng kiên nhẫn đợi nhé...");
+        await sendMessage(chatId, "⏳ Đang gửi yêu cầu tạo video AI, tiến trình có thể mất từ 1 - 2 phút tùy độ bận của máy chủ...");
         await sendVideo(chatId, prompt);
       }
-    } else {
+    } else if (userText) {
       // Trò chuyện bằng Groq AI
       const result = await askGroq(userText);
       if (result.text) {
