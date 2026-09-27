@@ -1,5 +1,6 @@
 const express = require('express');
 const axios = require('axios');
+const FormData = require('form-data');
 
 const app = express();
 app.use(express.json());
@@ -20,7 +21,7 @@ async function sendMessage(chatId, text) {
   }
 }
 
-// Hàm gọi Groq AI với model OpenAI (gpt-oss-20b) đang hoạt động chuẩn nhất
+// Hàm gọi Groq AI
 async function askGroq(promptText) {
   if (!GROQ_API_KEY) {
     return { error: "Chưa cấu hình GROQ_API_KEY trên Render!" };
@@ -32,7 +33,7 @@ async function askGroq(promptText) {
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       {
-        model: 'openai/gpt-oss-20b', // Sử dụng model OpenAI đang chạy chuẩn trên tài khoản của bạn
+        model: 'openai/gpt-oss-20b',
         messages: [
           { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },
           { role: 'user', content: promptText }
@@ -43,7 +44,8 @@ async function askGroq(promptText) {
         headers: {
           'Authorization': `Bearer ${cleanKey}`,
           'Content-Type': 'application/json'
-        }
+        },
+        timeout: 30000
       }
     );
     const content = response.data?.choices?.[0]?.message?.content?.trim();
@@ -77,7 +79,7 @@ async function sendPhoto(chatId, userPrompt) {
   }
 }
 
-// Hàm gửi video từ Pollinations AI (Định dạng video MP4)
+// Hàm gửi video từ Pollinations AI (Đã sửa lỗi Timeout & gửi file dạng Buffer)
 async function sendVideo(chatId, userPrompt) {
   try {
     const translatePrompt = `Translate this video description into a concise English prompt for video generation. Output ONLY the translated English text, no explanation: "${userPrompt}"`;
@@ -86,14 +88,24 @@ async function sendVideo(chatId, userPrompt) {
 
     const videoUrl = `https://video.pollinations.ai/prompt/${encodeURIComponent(englishPrompt)}?seed=${Math.floor(Math.random() * 1000000)}`;
 
-    await axios.post(`${TELEGRAM_API}/sendVideo`, {
-      chat_id: chatId,
-      video: videoUrl,
-      caption: `🎬 Video tạo theo yêu cầu: "${userPrompt}"`
+    // Tải video dạng stream với timeout 90s
+    const videoStream = await axios.get(videoUrl, {
+      responseType: 'stream',
+      timeout: 90000
+    });
+
+    const formData = new FormData();
+    formData.append('chat_id', chatId);
+    formData.append('caption', `🎬 Video tạo theo yêu cầu: "${userPrompt}"`);
+    formData.append('video', videoStream.data, { filename: 'video.mp4' });
+
+    await axios.post(`${TELEGRAM_API}/sendVideo`, formData, {
+      headers: formData.getHeaders(),
+      timeout: 90000
     });
   } catch (err) {
-    console.error('Lỗi tạo video:', err.message);
-    await sendMessage(chatId, "❌ Không thể tạo video lúc này (API video free có thể bận/timeout). Vui lòng thử lại sau ít phút!");
+    console.error('Lỗi tạo video:', err.response?.data || err.message);
+    await sendMessage(chatId, "❌ Máy chủ tạo video miễn phí đang bận hoặc thời gian render quá lâu (timeout). Vui lòng thử lại sau ít phút!");
   }
 }
 
@@ -129,7 +141,7 @@ app.post('/webhook', async (req, res) => {
       if (!prompt) {
         await sendMessage(chatId, "⚠️ Vui lòng nhập mô tả sau lệnh /video. Ví dụ: /video con mèo đang chạy trên cỏ");
       } else {
-        await sendMessage(chatId, "⏳ Đang khởi tạo video AI (tiến trình render mất từ 30s - 1 phút), vui lòng kiên nhẫn đợi nhé...");
+        await sendMessage(chatId, "⏳ Đang khởi tạo video AI (tiến trình render mất khoảng 30s - 1 phút), vui lòng kiên nhẫn đợi nhé...");
         await sendVideo(chatId, prompt);
       }
     } else {
