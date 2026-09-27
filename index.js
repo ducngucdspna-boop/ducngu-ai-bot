@@ -22,6 +22,10 @@ async function sendMessage(chatId, text) {
 
 // Hàm gọi Groq AI (Llama 3.3 70B)
 async function askGroq(promptText) {
+  if (!GROQ_API_KEY) {
+    return { error: "Chưa cấu hình GROQ_API_KEY trên Render!" };
+  }
+
   try {
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
@@ -40,22 +44,20 @@ async function askGroq(promptText) {
         }
       }
     );
-    return response.data?.choices?.[0]?.message?.content?.trim();
+    return { text: response.data?.choices?.[0]?.message?.content?.trim() };
   } catch (err) {
-    console.error('Lỗi Groq API:', err.response?.data || err.message);
-    return null;
+    const errObj = err.response?.data?.error;
+    const msg = errObj ? `[${errObj.code || 'Groq Error'}] ${errObj.message}` : err.message;
+    return { error: msg };
   }
 }
 
-// Hàm gửi ảnh từ Pollinations AI (Tự dịch prompt bằng Groq)
+// Hàm gửi ảnh từ Pollinations AI
 async function sendPhoto(chatId, userPrompt) {
   try {
     const translatePrompt = `Translate this image description into a concise English prompt for image generation. Output ONLY the translated English text, no explanation: "${userPrompt}"`;
-    let englishPrompt = await askGroq(translatePrompt);
-
-    if (!englishPrompt) {
-      englishPrompt = userPrompt;
-    }
+    const translationResult = await askGroq(translatePrompt);
+    let englishPrompt = translationResult.text || userPrompt;
 
     const finalPrompt = `${englishPrompt}, photorealistic, highly detailed, 8k resolution`;
     const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?model=flux&width=1024&height=1024&nologo=true&seed=${Math.floor(Math.random() * 1000000)}`;
@@ -83,7 +85,7 @@ app.post('/webhook', async (req, res) => {
 
   try {
     if (userText.startsWith('/start')) {
-      await sendMessage(chatId, "👋 Chào mừng bạn! Hãy nhắn tin bất kỳ để trò chuyện với AI (Groq/Llama 3), hoặc dùng lệnh /image <mô tả> để tạo ảnh.");
+      await sendMessage(chatId, "👋 Chào mừng bạn! Hãy nhắn tin bất kỳ để trò chuyện với AI, hoặc dùng lệnh /image <mô tả> để tạo ảnh.");
     } else if (userText.startsWith('/image')) {
       const prompt = userText.replace('/image', '').trim();
       if (!prompt) {
@@ -93,12 +95,12 @@ app.post('/webhook', async (req, res) => {
         await sendPhoto(chatId, prompt);
       }
     } else {
-      // Trò chuyện văn bản bằng Groq AI
-      const reply = await askGroq(userText);
-      if (reply) {
-        await sendMessage(chatId, reply);
+      // Trò chuyện bằng Groq AI
+      const result = await askGroq(userText);
+      if (result.text) {
+        await sendMessage(chatId, result.text);
       } else {
-        await sendMessage(chatId, "🤖 AI đang bận, vui lòng thử lại sau!");
+        await sendMessage(chatId, `❌ Lỗi Groq AI: ${result.error}`);
       }
     }
   } catch (error) {
@@ -113,5 +115,5 @@ app.get('/', (req, res) => {
 
 const PORT = process.env.PORT || 10000;
 app.listen(PORT, () => {
-  console.log(`Server đang lắng hệ tại port ${PORT}`);
+  console.log(`Server đang lắng nghe tại port ${PORT}`);
 });
