@@ -20,16 +20,54 @@ async function sendMessage(chatId, text) {
   }
 }
 
-// Hàm gửi ảnh từ Pollinations AI
-async function sendPhoto(chatId, prompt) {
-  const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(prompt)}?width=1024&height=1024&nologo=true&seed=${Math.floor(Math.random() * 1000000)}`;
+// Hàm gọi Gemini để xử lý văn bản
+async function askGemini(promptText) {
+  const candidateModels = [
+    'gemini-1.5-flash-latest',
+    'gemini-1.5-flash',
+    'gemini-pro'
+  ];
+
+  for (const modelName of candidateModels) {
+    try {
+      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
+      const response = await axios.post(geminiUrl, {
+        contents: [{ parts: [{ text: promptText }] }]
+      });
+      const reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
+      if (reply) return reply.trim();
+    } catch (err) {
+      // Tiếp tục thử model tiếp theo nếu lỗi
+    }
+  }
+  return null;
+}
+
+// Hàm gửi ảnh từ Pollinations AI (Tự động dịch prompt sang Tiếng Anh)
+async function sendPhoto(chatId, userPrompt) {
   try {
+    // 1. Nhờ Gemini dịch và tối ưu prompt tiếng Việt thành prompt tiếng Anh chuẩn
+    const translateSystemInstruction = `Translate the following image description into a concise, detailed English prompt suitable for AI image generation (Flux model). Output ONLY the English prompt text, nothing else: "${userPrompt}"`;
+    
+    let englishPrompt = await askGemini(translateSystemInstruction);
+
+    // Nếu Gemini bận, dùng trực tiếp prompt của người dùng
+    if (!englishPrompt) {
+      englishPrompt = userPrompt;
+    }
+
+    // 2. Thêm từ khóa tăng chất lượng ảnh
+    const finalPrompt = `${englishPrompt}, photorealistic, highly detailed, 8k resolution`;
+    const imageUrl = `https://image.pollinations.ai/prompt/${encodeURIComponent(finalPrompt)}?model=flux&width=1024&height=1024&nologo=true&seed=${Math.floor(Math.random() * 1000000)}`;
+
+    // 3. Gửi ảnh về Telegram
     await axios.post(`${TELEGRAM_API}/sendPhoto`, {
       chat_id: chatId,
       photo: imageUrl,
-      caption: `🎨 Ảnh tạo theo yêu cầu: "${prompt}"`
+      caption: `🎨 Ảnh tạo theo yêu cầu: "${userPrompt}"`
     });
   } catch (err) {
+    console.error('Lỗi tạo ảnh:', err.message);
     await sendMessage(chatId, "❌ Không thể tạo ảnh lúc này, vui lòng thử lại sau!");
   }
 }
@@ -50,41 +88,18 @@ app.post('/webhook', async (req, res) => {
     } else if (userText.startsWith('/image')) {
       const prompt = userText.replace('/image', '').trim();
       if (!prompt) {
-        await sendMessage(chatId, "⚠️ Vui lòng nhập mô tả sau lệnh /image. Ví dụ: /image con mèo đeo kính");
+        await sendMessage(chatId, "⚠️ Vui lòng nhập mô tả sau lệnh /image. Ví dụ: /image con chó golden chạy trên đồng cỏ");
       } else {
-        await sendMessage(chatId, "⏳ Đang tạo ảnh, vui lòng đợi...");
+        await sendMessage(chatId, "⏳ Đang tối ưu mô tả và tạo ảnh chất lượng cao, vui lòng đợi giây lát...");
         await sendPhoto(chatId, prompt);
       }
     } else {
-      // Danh sách các model để tự động chọn nếu model đầu tiên không khả dụng
-      const candidateModels = [
-        'gemini-1.5-flash-latest',
-        'gemini-1.5-flash',
-        'gemini-pro'
-      ];
-
-      let reply = null;
-      let lastError = null;
-
-      for (const modelName of candidateModels) {
-        try {
-          const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/${modelName}:generateContent?key=${GEMINI_API_KEY}`;
-          const response = await axios.post(geminiUrl, {
-            contents: [{ parts: [{ text: userText }] }]
-          });
-          reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
-          if (reply) break;
-        } catch (err) {
-          lastError = err;
-        }
-      }
-
+      // Trò chuyện bằng Gemini
+      const reply = await askGemini(userText);
       if (reply) {
         await sendMessage(chatId, reply);
       } else {
-        const errObj = lastError?.response?.data?.error;
-        const msg = errObj ? `[${errObj.code}] ${errObj.message}` : (lastError?.message || 'Không xác định');
-        await sendMessage(chatId, `❌ Lỗi Gemini: ${msg}`);
+        await sendMessage(chatId, "🤖 AI chưa thể phản hồi lúc này, bạn vui lòng thử lại sau nhé!");
       }
     }
   } catch (error) {
