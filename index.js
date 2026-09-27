@@ -20,36 +20,42 @@ async function sendMessage(chatId, text) {
   }
 }
 
-// Hàm gọi Groq AI (Llama 3.3 70B)
+// Hàm gọi Groq AI
 async function askGroq(promptText) {
   if (!GROQ_API_KEY) {
     return { error: "Chưa cấu hình GROQ_API_KEY trên Render!" };
   }
 
-  try {
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'llama-3.3-70b-versatile',
-        messages: [
-          { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },
-          { role: 'user', content: promptText }
-        ],
-        temperature: 0.7
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${GROQ_API_KEY}`,
-          'Content-Type': 'application/json'
+  // Danh sách các model Groq hoạt động tốt nhất
+  const models = ['llama3-70b-8192', 'llama3-8b-8192', 'mixtral-8x7b-32768'];
+
+  for (const model of models) {
+    try {
+      const response = await axios.post(
+        'https://api.groq.com/openai/v1/chat/completions',
+        {
+          model: model,
+          messages: [
+            { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },
+            { role: 'user', content: promptText }
+          ],
+          temperature: 0.7
+        },
+        {
+          headers: {
+            'Authorization': `Bearer ${GROQ_API_KEY}`,
+            'Content-Type': 'application/json'
+          }
         }
-      }
-    );
-    return { text: response.data?.choices?.[0]?.message?.content?.trim() };
-  } catch (err) {
-    const errObj = err.response?.data?.error;
-    const msg = errObj ? `[${errObj.code || 'Groq Error'}] ${errObj.message}` : err.message;
-    return { error: msg };
+      );
+      const content = response.data?.choices?.[0]?.message?.content?.trim();
+      if (content) return { text: content };
+    } catch (err) {
+      console.error(`Lỗi thử model ${model}:`, err.response?.data?.error?.message || err.message);
+    }
   }
+
+  return { error: "Không thể kết nối đến các model của Groq AI." };
 }
 
 // Hàm gửi ảnh từ Pollinations AI
