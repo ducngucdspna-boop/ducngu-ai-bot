@@ -1,5 +1,6 @@
 const express = require('express');
 const axios = require('axios');
+const { GoogleGenerativeAI } = require('@google/generative-ai');
 
 const app = express();
 app.use(express.json());
@@ -7,6 +8,10 @@ app.use(express.json());
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GEMINI_API_KEY = process.env.GEMINI_API_KEY;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
+
+// Khởi tạo SDK Gemini AI
+const genAI = new GoogleGenerativeAI(GEMINI_API_KEY);
+const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' });
 
 // Hàm gửi tin nhắn Telegram
 async function sendMessage(chatId, text) {
@@ -36,8 +41,7 @@ async function sendPhoto(chatId, prompt) {
 
 // Route nhận Webhook
 app.post('/webhook', async (req, res) => {
-  // Trả về 200 OK ngay lập tức cho Telegram để tránh timeout
-  res.sendStatus(200);
+  res.sendStatus(200); // Trả về 200 OK ngay lập tức
 
   const message = req.body?.message;
   if (!message || !message.text) return;
@@ -47,7 +51,7 @@ app.post('/webhook', async (req, res) => {
 
   try {
     if (userText.startsWith('/start')) {
-      await sendMessage(chatId, "👋 Chào mừng bạn! Nhắn tin bất kỳ để trò chuyện với AI, hoặc dùng lệnh:\n/image <mô tả> để tạo ảnh.");
+      await sendMessage(chatId, "👋 Chào mừng bạn! Hãy nhắn tin bất kỳ để trò chuyện với AI, hoặc dùng lệnh /image <mô tả> để tạo ảnh.");
     } else if (userText.startsWith('/image')) {
       const prompt = userText.replace('/image', '').trim();
       if (!prompt) {
@@ -57,22 +61,19 @@ app.post('/webhook', async (req, res) => {
         await sendPhoto(chatId, prompt);
       }
     } else {
-      // Gọi Gemini API v1beta
-      const geminiUrl = `https://generativelanguage.googleapis.com/v1beta/models/gemini-1.5-flash:generateContent?key=${GEMINI_API_KEY}`;
-      const response = await axios.post(geminiUrl, {
-        contents: [{ parts: [{ text: userText }] }]
-      });
+      // Gọi Gemini qua SDK chính thức
+      const result = await model.generateContent(userText);
+      const reply = result.response.text();
 
-      const reply = response.data?.candidates?.[0]?.content?.parts?.[0]?.text;
       if (reply) {
         await sendMessage(chatId, reply);
       } else {
-        await sendMessage(chatId, "🤖 AI không thể đưa ra phản hồi, thử lại nhé!");
+        await sendMessage(chatId, "🤖 AI không đưa ra phản hồi, thử lại nhé!");
       }
     }
   } catch (error) {
-    console.error("Lỗi Gemini/Server:", error.response?.data || error.message);
-    await sendMessage(chatId, "❌ Đã xảy ra lỗi khi kết nối với AI. Hãy kiểm tra lại Gemini API Key!");
+    console.error("Lỗi xử lý Gemini AI:", error);
+    await sendMessage(chatId, "❌ Đã xảy ra lỗi khi kết nối với AI Gemini!");
   }
 });
 
