@@ -1,6 +1,7 @@
 const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
+const cron = require('node-cron');
 
 const app = express();
 app.use(express.json());
@@ -9,8 +10,11 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
-// ⚠️ ĐỔI LINK NÀY THÀNH LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY TÍNH CỦA BẠN
+// ⚠️ CẬP NHẬT LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY BẠN
 const HIS_BASE_URL = 'https://conservation-unknown-got-manga.trycloudflare.com';
+
+// ID Chat Telegram của Bạn để nhận tin nhắn nhắc nhở
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
 
 // Danh sách mã quầy tương ứng với từng hình thức khám
 const COUNTER_MAP = {
@@ -21,8 +25,9 @@ const COUNTER_MAP = {
   'default': 'cnt_ca177a18'
 };
 
-// Hàm gửi tin nhắn Telegram thông thường
+// Hàm gửi tin nhắn Telegram
 async function sendMessage(chatId, text, replyMarkup = null) {
+  if (!chatId) return;
   try {
     const payload = {
       chat_id: chatId,
@@ -74,9 +79,7 @@ async function askGroq(promptText) {
   }
 }
 
-// --- LOGIC API LẤY SỐ & THAO TÁC QUẦY ---
-
-// Lấy 1 số mới
+// API LẤY SỐ MỚI
 async function createTicket(departmentId) {
   try {
     const res = await axios.post(`${HIS_BASE_URL}/api/tickets`, { departmentId }, { timeout: 10000 });
@@ -87,7 +90,7 @@ async function createTicket(departmentId) {
   }
 }
 
-// Thao tác điều khiển quầy
+// API ĐIỀU KHIỂN QUẦY
 async function controlCounter(action, counterKey) {
   const counterId = COUNTER_MAP[counterKey?.toLowerCase()] || counterKey || COUNTER_MAP['default'];
   try {
@@ -99,17 +102,43 @@ async function controlCounter(action, counterKey) {
   }
 }
 
-// --- XỬ LÝ LỆNH BẤM NÚT (CALLBACK QUERY) THAY VÌ GÕ TAY ---
+// --- TỰ ĐỘNG LẬP LỊCH NHẮC NHỞ (CRON JOB) ---
+// Chạy đúng 07:00 sáng mỗi ngày ('0 7 * * *') theo múi giờ Việt Nam
+cron.schedule('0 7 * * *', async () => {
+  if (!ADMIN_CHAT_ID) {
+    console.log("Chưa cài đặt ADMIN_CHAT_ID để gửi tin nhắn nhắc nhở.");
+    return;
+  }
+
+  const keyboard = {
+    inline_keyboard: [
+      [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
+      [{ text: "💵 Viện phí (dept_vp)", callback_data: "layso_dept_vp" }],
+      [{ text: "⭐ Khám theo yêu cầu (dept_yc)", callback_data: "layso_dept_yc" }],
+      [{ text: "❤️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
+    ]
+  };
+
+  // Gửi tin nhắn nhắc nhở tới Telegram
+  await sendMessage(
+    ADMIN_CHAT_ID,
+    "⏰ **BÁO THỨC ĐẦU NGÀY KHÁM BỆNH!**\n\n" +
+    "Đã đến giờ mở sổ bấm số ngày mới. Vui lòng chọn đối tượng bên dưới để bắt đầu bấm số mở hàng:",
+    keyboard
+  );
+}, {
+  timezone: "Asia/Ho_Chi_Minh"
+});
+
+// --- XỬ LÝ SỰ KIỆN BẤM NÚT TELEGRAM ---
 async function handleCallbackQuery(callbackQuery) {
   const chatId = callbackQuery.message.chat.id;
-  const data = callbackQuery.data; // Ví dụ: 'layso_dept_bh' hoặc 'goiso_vienphi'
+  const data = callbackQuery.data;
 
-  // Phản hồi cho Telegram biết đã nhận được lệnh bấm nút
   try {
     await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, { callback_query_id: callbackQuery.id });
   } catch (e) {}
 
-  // LẤY SỐ
   if (data.startsWith('layso_')) {
     const deptId = data.replace('layso_', '');
     await sendMessage(chatId, "⏳ Đang cấp số thứ tự...");
@@ -118,21 +147,19 @@ async function handleCallbackQuery(callbackQuery) {
       await sendMessage(
         chatId,
         `🎉 **CẤP SỐ THÀNH CÔNG!**\n\n` +
-        `🏥 **Chuyên khoa/Đối tượng:** ${result.departmentName || deptId}\n` +
+        `🏥 **Đối tượng:** ${result.departmentName || deptId}\n` +
         `🔢 **Số thứ tự:** \`${result.code}\`\n` +
         `👥 **Đang chờ phía trước:** \`${result.waitingAhead || 0}\` người`
       );
     } else {
-      await sendMessage(chatId, "❌ Không thể lấy số. Mã khoa không đúng hoặc máy chủ phòng khám chưa bật.");
+      await sendMessage(chatId, "❌ Không thể lấy số. Kiểm tra lại kết nối máy chủ.");
     }
-  } 
-  // GỌI SỐ
-  else if (data.startsWith('goiso_')) {
+  } else if (data.startsWith('goiso_')) {
     const counterKey = data.replace('goiso_', '');
     await sendMessage(chatId, `⏳ Đang gọi số cho quầy [${counterKey}]...`);
     const res = await controlCounter('call-next', counterKey);
     if (res?.data?.empty) {
-      await sendMessage(chatId, `⚠️ **Hàng đợi trống!** Không có bệnh nhân nào đang chờ tại quầy này.`);
+      await sendMessage(chatId, `⚠️ **Hàng đợi trống!** Không có bệnh nhân nào đang chờ.`);
     } else if (res?.data?.ticket) {
       await sendMessage(chatId, `📢 **ĐÃ GỌI SỐ:** \`${res.data.ticket.code}\` lên màn hình quầy \`${res.counterId}\`!`);
     } else {
@@ -145,7 +172,6 @@ async function handleCallbackQuery(callbackQuery) {
 app.post('/webhook', async (req, res) => {
   res.sendStatus(200);
 
-  // Xử lý sự kiện bấm Nút (Inline Keyboard)
   if (req.body?.callback_query) {
     await handleCallbackQuery(req.body.callback_query);
     return;
@@ -165,13 +191,9 @@ app.post('/webhook', async (req, res) => {
         "• Gõ `/layso` để mở danh sách chọn đối tượng lấy số.\n" +
         "• Gõ `/goiso` để mở menu gọi số theo từng quầy màn hình."
       );
-    } 
-    // 1. LỆNH /LAYSO: HIỆN DANH SÁCH NÚT BẤM CÁC KHOA / ĐỐI TƯỢNG
-    else if (userText.startsWith('/layso')) {
+    } else if (userText.startsWith('/layso')) {
       const param = userText.replace('/layso', '').trim();
-
       if (!param) {
-        // Tạo nút bấm chọn nhanh đối tượng
         const keyboard = {
           inline_keyboard: [
             [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
@@ -180,38 +202,18 @@ app.post('/webhook', async (req, res) => {
             [{ text: "❤️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
           ]
         };
-
-        await sendMessage(
-          chatId,
-          "🏥 **BẤM NÚT DƯỚI ĐÂY HOẶC GÕ CÚ PHÁP ĐỂ LẤY SỐ:**\n\n" +
-          "• `/layso dept_bh` : Lấy số Bảo hiểm y tế\n" +
-          "• `/layso dept_vp` : Lấy số Viện phí\n" +
-          "• `/layso dept_yc` : Lấy số Yêu cầu\n" +
-          "• `/layso dept_ut` : Lấy số Ưu tiên",
-          keyboard
-        );
+        await sendMessage(chatId, "🏥 **CHỌN ĐỐI TƯỢNG ĐỂ BẤM LẤY SỐ:**", keyboard);
       } else {
-        await sendMessage(chatId, "⏳ Đang cấp số...");
         const result = await createTicket(param);
         if (result && result.code) {
-          await sendMessage(
-            chatId,
-            `🎉 **CẤP SỐ THÀNH CÔNG!**\n\n` +
-            `🏥 **Đối tượng:** ${result.departmentName || param}\n` +
-            `🔢 **Số thứ tự:** \`${result.code}\`\n` +
-            `👥 **Chờ phía trước:** \`${result.waitingAhead || 0}\` người`
-          );
+          await sendMessage(chatId, `🎉 **CẤP SỐ THÀNH CÔNG!** Số: \`${result.code}\``);
         } else {
-          await sendMessage(chatId, "❌ Lỗi cấp số, vui lòng kiểm tra mã khoa/đối tượng.");
+          await sendMessage(chatId, "❌ Lỗi cấp số.");
         }
       }
-    }
-    // 2. LỆNH /GOISO: HIỆN DANH SÁCH NÚT BẤM CHO CÁC QUẦY
-    else if (userText.startsWith('/goiso') || userText.startsWith('/next')) {
-      const counterKey = userText.replace(/\/goiso|\/next/, '').trim();
-
+    } else if (userText.startsWith('/goiso')) {
+      const counterKey = userText.replace('/goiso', '').trim();
       if (!counterKey) {
-        // Tạo nút bấm chọn nhanh quầy gọi số
         const keyboard = {
           inline_keyboard: [
             [{ text: "📢 Gọi quầy Bảo hiểm", callback_data: "goiso_baohiem" }],
@@ -220,37 +222,21 @@ app.post('/webhook', async (req, res) => {
             [{ text: "📢 Gọi quầy Ưu tiên", callback_data: "goiso_uutien" }]
           ]
         };
-
-        await sendMessage(
-          chatId,
-          "📢 **CHỌN QUẦY CẦN GỌI SỐ (BẤM NÚT DƯỚI HOẶC GÕ CÚ PHÁP):**\n\n" +
-          "• `/goiso baohiem` : Gọi quầy Bảo hiểm\n" +
-          "• `/goiso vienphi` : Gọi quầy Viện phí\n" +
-          "• `/goiso yeucau` : Gọi số quầy Yêu cầu\n" +
-          "• `/goiso uutien` : Gọi số quầy Ưu tiên",
-          keyboard
-        );
+        await sendMessage(chatId, "📢 **CHỌN QUẦY CẦN GỌI SỐ:**", keyboard);
       } else {
-        await sendMessage(chatId, `⏳ Đang gọi số cho quầy [${counterKey}]...`);
         const res = await controlCounter('call-next', counterKey);
-        if (res?.data?.empty) {
-          await sendMessage(chatId, `⚠️ **Hàng đợi trống!** Không có bệnh nhân nào đang chờ.`);
-        } else if (res?.data?.ticket) {
-          await sendMessage(chatId, `📢 **ĐÃ GỌI SỐ:** \`${res.data.ticket.code}\` lên màn hình quầy \`${res.counterId}\`!`);
+        if (res?.data?.ticket) {
+          await sendMessage(chatId, `📢 **ĐÃ GỌI SỐ:** \`${res.data.ticket.code}\`!`);
         } else {
-          await sendMessage(chatId, "❌ Không thể thực hiện lệnh gọi số.");
+          await sendMessage(chatId, "⚠️ Hàng đợi trống hoặc không thể gọi.");
         }
       }
-    }
-    // LỆNH GÕ CHAT AI KHÁC
-    else if (userText) {
+    } else if (userText) {
       const result = await askGroq(userText);
       if (result.text) await sendMessage(chatId, result.text);
-      else await sendMessage(chatId, `❌ Lỗi Groq API: ${result.error}`);
     }
   } catch (error) {
     console.error("Lỗi hệ thống:", error.message);
-    await sendMessage(chatId, `❌ Lỗi hệ thống: ${error.message}`);
   }
 });
 
