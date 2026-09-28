@@ -12,7 +12,7 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 // ⚠️ ĐỔI LINK NÀY THÀNH LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY TÍNH CỦA BẠN
 const HIS_BASE_URL = 'https://verse-july-cable-inflation.trycloudflare.com';
 
-// ID Quầy mặc định của bạn (lấy từ link display)
+// ID Quầy mặc định của bạn
 const DEFAULT_COUNTER_ID = 'cnt_ca177a18';
 
 // Hàm gửi tin nhắn Telegram
@@ -171,7 +171,7 @@ app.post('/webhook', async (req, res) => {
         "👋 **HỆ THỐNG ĐIỀU KHIỂN BẤM SỐ & QUẦY KHÁM**\n\n" +
         "📌 **Dành cho Bệnh nhân:**\n" +
         "• `/layso`: Xem danh sách khoa & bấm lấy số\n\n" +
-        "📌 **Dành cho Bác sĩ / Quầy khám (`cnt_ca177a18`):**\n" +
+        "📌 **Dành cho Bác sĩ / Quầy khám:**\n" +
         "• `/goiso` hoặc `/next`: Gọi số tiếp theo vào quầy\n" +
         "• `/goilai` hoặc `/recall`: Gọi lại số hiện tại\n" +
         "• `/boqua` hoặc `/skip`: Bỏ qua lượt hiện tại\n" +
