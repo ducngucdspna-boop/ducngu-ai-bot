@@ -59,8 +59,7 @@ async function askGroq(promptText) {
     if (content) return { text: content };
     return { error: "Groq không trả về nội dung." };
   } catch (err) {
-    const errObj = err.response?.data?.error;
-    const errorMsg = errObj ? `[${errObj.code \vert{}\vert{} 'Error'}]${errObj.message}` : err.message;
+    const errorMsg = err.response?.data?.error?.message || err.message;
     return { error: errorMsg };
   }
 }
