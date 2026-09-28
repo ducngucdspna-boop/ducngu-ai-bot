@@ -10,7 +10,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 // ⚠️ ĐỔI LINK NÀY THÀNH LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY TÍNH CỦA BẠN
-const HIS_BASE_URL = 'https://verse-july-cable-inflation.trycloudflare.com';
+const HIS_BASE_URL = 'https://conservation-unknown-got-manga.trycloudflare.com';
 
 // Danh sách mã quầy tương ứng với từng hình thức khám
 const COUNTER_MAP = {
