@@ -12,8 +12,14 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 // ⚠️ ĐỔI LINK NÀY THÀNH LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY TÍNH CỦA BẠN
 const HIS_BASE_URL = 'https://verse-july-cable-inflation.trycloudflare.com';
 
-// ID Quầy mặc định của bạn
-const DEFAULT_COUNTER_ID = 'cnt_ca177a18';
+// Danh sách mã quầy tương ứng với từng hình thức khám
+const COUNTER_MAP = {
+  'vienphi': 'cnt_9a545709',
+  'yeucau': 'cnt_e6cce8f3',
+  'uutien': 'cnt_0c9973ab',
+  'baohiem': 'cnt_ca177a18',
+  'default': 'cnt_ca177a18' // Mặc định nếu không chỉ định quầy
+};
 
 // Hàm gửi tin nhắn Telegram
 async function sendMessage(chatId, text) {
@@ -98,7 +104,7 @@ async function sendVideo(chatId, userPrompt) {
     const contentType = response.headers['content-type'] || '';
 
     if (!contentType.includes('video') && !contentType.includes('mp4')) {
-      await sendMessage(chatId, "⚠️ Server tạo video miễn phí hiện đang quá tải. Vui lòng thử lại sau hoặc chuyển sang dùng lệnh /image!");
+      await sendMessage(chatId, "⚠️ Server tạo video miễn phí hiện đang quá tải. Vui lòng thử lại sau!");
       return;
     }
 
@@ -118,7 +124,7 @@ async function sendVideo(chatId, userPrompt) {
   }
 }
 
-// --- LOGIC GỌI API LẤY SỐ & THAO TÁC QUẦY ---
+// --- LOGIC API LẤY SỐ & THAO TÁC QUẦY ---
 
 // 1. Đọc danh sách khoa
 async function getDepartments() {
@@ -142,11 +148,12 @@ async function createTicket(departmentId) {
   }
 }
 
-// 3. Thao tác điều khiển quầy (Call Next / Recall / Skip / Done)
-async function controlCounter(action, counterId = DEFAULT_COUNTER_ID) {
+// 3. Thao tác điều khiển quầy
+async function controlCounter(action, counterKey) {
+  const counterId = COUNTER_MAP[counterKey?.toLowerCase()] || counterKey || COUNTER_MAP['default'];
   try {
     const res = await axios.post(`${HIS_BASE_URL}/api/counters/${counterId}/${action}`, {}, { timeout: 10000 });
-    return res.data;
+    return { data: res.data, counterId };
   } catch (error) {
     console.error(`Lỗi thao tác quầy (${action}):`, error.message);
     return null;
@@ -170,14 +177,15 @@ app.post('/webhook', async (req, res) => {
         "👋 **HỆ THỐNG ĐIỀU KHIỂN BẤM SỐ & QUẦY KHÁM**\n\n" +
         "📌 **Dành cho Bệnh nhân:**\n" +
         "• `/layso`: Xem danh sách khoa & bấm lấy số\n\n" +
-        "📌 **Dành cho Bác sĩ / Quầy khám:**\n" +
-        "• `/goiso` hoặc `/next`: Gọi số tiếp theo vào quầy\n" +
-        "• `/goilai` hoặc `/recall`: Gọi lại số hiện tại\n" +
-        "• `/boqua` hoặc `/skip`: Bỏ qua lượt hiện tại\n" +
-        "• `/hoanthanh` hoặc `/done`: Hoàn thành lượt hiện tại\n\n" +
-        "🎨 **Công cụ AI:**\n" +
-        "• `/image <mô tả>`: Tạo ảnh AI\n" +
-        "• `/video <mô tả>`: Tạo video AI"
+        "📌 **Lệnh gọi số theo từng quầy:**\n" +
+        "• `/goiso vienphi`: Gọi số vào Quầy Viện phí (`cnt_9a545709`)\n" +
+        "• `/goiso yeucau`: Gọi số vào Quầy Yêu cầu (`cnt_e6cce8f3`)\n" +
+        "• `/goiso uutien`: Gọi số vào Quầy Ưu tiên (`cnt_0c9973ab`)\n" +
+        "• `/goiso baohiem`: Gọi số vào Quầy Bảo hiểm (`cnt_ca177a18`)\n\n" +
+        "📌 **Các thao tác khác:**\n" +
+        "• `/goilai <tên_quầy>`: Gọi lại số hiện tại\n" +
+        "• `/boqua <tên_quầy>`: Bỏ qua lượt hiện tại\n" +
+        "• `/hoanthanh <tên_quầy>`: Hoàn thành lượt"
       );
     } 
     // LẤY SỐ
@@ -218,40 +226,44 @@ app.post('/webhook', async (req, res) => {
     }
     // GỌI SỐ TIẾP THEO
     else if (userText.startsWith('/goiso') || userText.startsWith('/next')) {
-      await sendMessage(chatId, "⏳ Đang gọi số tiếp theo...");
-      const res = await controlCounter('call-next');
-      if (res?.empty) {
-        await sendMessage(chatId, "⚠️ **Hàng đợi trống!** Không có bệnh nhân nào đang chờ.");
-      } else if (res?.ticket) {
-        await sendMessage(chatId, `📢 **ĐÃ GỌI SỐ:** \`${res.ticket.code}\` vào Quầy!`);
+      const counterKey = userText.replace(/\/goiso|\/next/, '').trim();
+      await sendMessage(chatId, `⏳ Đang gọi số cho quầy [${counterKey || 'mặc định'}]...`);
+      
+      const res = await controlCounter('call-next', counterKey);
+      if (res?.data?.empty) {
+        await sendMessage(chatId, `⚠️ **Hàng đợi trống!** Không có bệnh nhân nào đang chờ.`);
+      } else if (res?.data?.ticket) {
+        await sendMessage(chatId, `📢 **ĐÃ GỌI SỐ:** \`${res.data.ticket.code}\` lên màn hình display quầy \`${res.counterId}\`!`);
       } else {
         await sendMessage(chatId, "❌ Không thể thực hiện lệnh gọi số.");
       }
     }
-    // GỌI LẠI SỐ HIỆN TẠI
+    // GỌI LẠI SỐ
     else if (userText.startsWith('/goilai') || userText.startsWith('/recall')) {
-      await sendMessage(chatId, "⏳ Đang gọi lại số...");
-      const res = await controlCounter('recall');
-      if (res?.ticket) {
-        await sendMessage(chatId, `📢 **ĐÃ GỌI LẠI SỐ:** \`${res.ticket.code}\``);
+      const counterKey = userText.replace(/\/goilai|\/recall/, '').trim();
+      const res = await controlCounter('recall', counterKey);
+      if (res?.data?.ticket) {
+        await sendMessage(chatId, `📢 **ĐÃ GỌI LẠI SỐ:** \`${res.data.ticket.code}\` tại quầy \`${res.counterId}\``);
       } else {
         await sendMessage(chatId, "⚠️ Hiện tại quầy chưa có số nào để gọi lại.");
       }
     }
-    // BỎ QUA SỐ HIỆN TẠI
+    // BỎ QUA
     else if (userText.startsWith('/boqua') || userText.startsWith('/skip')) {
-      const res = await controlCounter('skip');
+      const counterKey = userText.replace(/\/boqua|\/skip/, '').trim();
+      const res = await controlCounter('skip', counterKey);
       if (res) {
-        await sendMessage(chatId, "⏭️ **Đã bỏ qua** số hiện tại.");
+        await sendMessage(chatId, `⏭️ **Đã bỏ qua** số hiện tại ở quầy \`${res.counterId}\`.`);
       } else {
         await sendMessage(chatId, "❌ Thao tác bỏ qua thất bại.");
       }
     }
     // HOÀN THÀNH
     else if (userText.startsWith('/hoanthanh') || userText.startsWith('/done')) {
-      const res = await controlCounter('done');
+      const counterKey = userText.replace(/\/hoanthanh|\/done/, '').trim();
+      const res = await controlCounter('done', counterKey);
       if (res) {
-        await sendMessage(chatId, "✅ **Đã hoàn thành** lượt khám.");
+        await sendMessage(chatId, `✅ **Đã hoàn thành** lượt khám tại quầy \`${res.counterId}\`.`);
       } else {
         await sendMessage(chatId, "❌ Thao tác hoàn thành thất bại.");
       }
