@@ -13,7 +13,7 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 // ⚠️ CẬP NHẬT LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY BẠN
 const HIS_BASE_URL = 'https://conservation-unknown-got-manga.trycloudflare.com';
 
-// ID Chat Telegram của Bạn để nhận tin nhắn nhắc nhở
+// ID Chat Telegram của Bạn để nhận bản tin & nhắc nhở
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
 
 // Danh sách mã quầy tương ứng với từng hình thức khám
@@ -79,7 +79,52 @@ async function askGroq(promptText) {
   }
 }
 
-// API LẤY SỐ MỚI
+// --- HÀM LẤY THÔNG TIN THỜI TIẾT, BITCOIN, GIÁ VÀNG ---
+
+// 1. Lấy thời tiết TP. Vinh (Dùng Open-Meteo API miễn phí)
+async function getWeatherVinh() {
+  try {
+    const url = 'https://api.open-meteo.com/v1/forecast?latitude=18.6734&longitude=105.6923&current_weather=true&timezone=Asia%2FHo_Chi_Minh';
+    const res = await axios.get(url, { timeout: 10000 });
+    const weather = res.data?.current_weather;
+    if (weather) {
+      return `🌤️ **Nhiệt độ:** ${weather.temperature}°C \vert{} **Tốc độ gió:** ${weather.windspeed} km/h`;
+    }
+    return "⚠️ Không thể lấy thông tin thời tiết.";
+  } catch (e) {
+    return "⚠️ Lỗi kết nối thời tiết.";
+  }
+}
+
+// 2. Lấy giá Bitcoin (Dùng CoinGecko API miễn phí)
+async function getBitcoinPrice() {
+  try {
+    const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,vnd';
+    const res = await axios.get(url, { timeout: 10000 });
+    const btc = res.data?.bitcoin;
+    if (btc) {
+      const usd = btc.usd.toLocaleString('en-US');
+      const vnd = btc.vnd.toLocaleString('vi-VN');
+      return `🪙 **BTC/USD:** $${usd}\n🇻🇳 **BTC/VND:** ${vnd} VNĐ`;
+    }
+    return "⚠️ Không thể lấy giá Bitcoin.";
+  } catch (e) {
+    return "⚠️ Lỗi kết nối giá Bitcoin.";
+  }
+}
+
+// 3. Lấy thông tin giá Vàng từ AI / API công khai
+async function getGoldPrice() {
+  try {
+    const prompt = "Hãy tổng hợp ngắn gọn giá vàng SJC (Mua vào - Bán ra) mới nhất hôm nay tại Việt Nam. Chỉ đưa ra con số ước tính ngắn gọn trong 2 dòng, không giải thích dài dòng.";
+    const result = await askGroq(prompt);
+    return result.text || "⚠️ Chưa cập nhật được giá vàng.";
+  } catch (e) {
+    return "⚠️ Lỗi cập nhật giá vàng.";
+  }
+}
+
+// --- API LẤY SỐ MỚI & ĐIỀU KHIỂN QUẦY ---
 async function createTicket(departmentId) {
   try {
     const res = await axios.post(`${HIS_BASE_URL}/api/tickets`, { departmentId }, { timeout: 10000 });
@@ -90,7 +135,6 @@ async function createTicket(departmentId) {
   }
 }
 
-// API ĐIỀU KHIỂN QUẦY
 async function controlCounter(action, counterKey) {
   const counterId = COUNTER_MAP[counterKey?.toLowerCase()] || counterKey || COUNTER_MAP['default'];
   try {
@@ -102,14 +146,19 @@ async function controlCounter(action, counterKey) {
   }
 }
 
-// --- TỰ ĐỘNG LẬP LỊCH NHẮC NHỞ (CRON JOB) ---
-// Chạy đúng 07:00 sáng mỗi ngày ('0 7 * * *') theo múi giờ Việt Nam
+// --- TỰ ĐỘNG LẬP LỊCH BẢN TIN SÁNG LÚC 07:00 ---
 cron.schedule('0 7 * * *', async () => {
   if (!ADMIN_CHAT_ID) {
-    console.log("Chưa cài đặt ADMIN_CHAT_ID để gửi tin nhắn nhắc nhở.");
+    console.log("Chưa cài đặt ADMIN_CHAT_ID để gửi bản tin.");
     return;
   }
 
+  // 1. Lấy thông tin tổng hợp
+  const weatherText = await getWeatherVinh();
+  const btcText = await getBitcoinPrice();
+  const goldText = await getGoldPrice();
+
+  // 2. Tạo giao diện nút bấm lấy số đầu ngày
   const keyboard = {
     inline_keyboard: [
       [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
@@ -119,13 +168,17 @@ cron.schedule('0 7 * * *', async () => {
     ]
   };
 
-  // Gửi tin nhắn nhắc nhở tới Telegram
-  await sendMessage(
-    ADMIN_CHAT_ID,
-    "⏰ **BÁO THỨC ĐẦU NGÀY KHÁM BỆNH!**\n\n" +
-    "Đã đến giờ mở sổ bấm số ngày mới. Vui lòng chọn đối tượng bên dưới để bắt đầu bấm số mở hàng:",
-    keyboard
-  );
+  const morningMessage = 
+    "☀️ **BẢN TIN SÁNG & NHẮC NHỞ ĐẦU NGÀY** ☀️\n\n" +
+    "📍 **Thời tiết TP. Vinh - Nghệ An:**\n" + `${weatherText}\n\n` +
+    "📈 **Giá Bitcoin hôm nay:**\n" + `${btcText}\n\n` +
+    "🏆 **Giá Vàng tham khảo:**\n" + `${goldText}\n\n` +
+    "───────────────────\n" +
+    "⏰ **NHẮC NHỞ LẤY SỐ KHÁM BỆNH:**\n" +
+    "Đã đến giờ mở sổ bấm số ngày mới. Bấm chọn đối tượng bên dưới để cấp số mở hàng:";
+
+  // Gửi bản tin qua Telegram
+  await sendMessage(ADMIN_CHAT_ID, morningMessage, keyboard);
 }, {
   timezone: "Asia/Ho_Chi_Minh"
 });
@@ -187,9 +240,9 @@ app.post('/webhook', async (req, res) => {
     if (userText.startsWith('/start')) {
       await sendMessage(
         chatId, 
-        "👋 **HỆ THỐNG QUẢN LÝ BẤM SỐ KHÁM BỆNH**\n\n" +
-        "• Gõ `/layso` để mở danh sách chọn đối tượng lấy số.\n" +
-        "• Gõ `/goiso` để mở menu gọi số theo từng quầy màn hình."
+        `👋 Chào bạn! Chat ID của bạn là: \`${chatId}\`\n\n` +
+        "• Dùng lệnh `/layso` để mở danh sách bấm số.\n" +
+        "• Dùng lệnh `/goiso` để mở danh sách gọi số."
       );
     } else if (userText.startsWith('/layso')) {
       const param = userText.replace('/layso', '').trim();
