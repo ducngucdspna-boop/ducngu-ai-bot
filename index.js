@@ -7,12 +7,13 @@ const Parser = require('rss-parser');
 const app = express();
 app.use(express.json());
 
+// Khởi tạo RSS Parser với Timeout 5000ms (5 giây) để tránh bị treo
 const parser = new Parser({
+  timeout: 5000,
   headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-    'Accept': 'application/rss+xml, application/xml, text/xml, */*'
-  },
-  timeout: 8000
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+  }
 });
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
@@ -89,15 +90,15 @@ async function askGroq(promptText) {
   }
 }
 
-// --- HÀM LẤY TIN TỨC TỪ RSS TRỰC TIẾP (CÓ FALLBACK AI) ---
+// --- HÀM LẤY TIN TỨC AN TOÀN CHỐNG HẰNG HỌC / TREO ---
 async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
   try {
     const feed = await parser.parseURL(rssUrl);
     let resultText = `📰 **TIN MỚI TỪ ${sourceName.toUpperCase()}**:\n`;
     const items = feed.items ? feed.items.slice(0, limit) : [];
-
+    
     if (items.length === 0) {
-      return await getNewsFallbackAI(sourceName);
+      return `⚠️ Không có bài viết mới từ ${sourceName}.`;
     }
 
     items.forEach((item, index) => {
@@ -105,30 +106,16 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
       const link = item.link ? item.link.trim() : '#';
       resultText += `${index + 1}. [${title}](${link})\n`;
     });
-
+    
     return resultText;
   } catch (error) {
-    console.error(`Lỗi lấy RSS từ ${sourceName}:`, error.message);
-    // Khi RSS lỗi, tự động dùng AI tổng hợp tin của nguồn đó
-    return await getNewsFallbackAI(sourceName);
+    console.error(`Lỗi đọc tin từ ${sourceName}:`, error.message);
+    return `⚠️ Không thể lấy tin từ ${sourceName} (Lỗi/Timeout).`;
   }
-}
-
-// Hàm dự phòng bằng AI khi nguồn RSS bị chặn
-async function getNewsFallbackAI(sourceName) {
-  try {
-    const prompt = `Tổng hợp 3 tin tức nổi bật và quan trọng nhất hôm nay từ nguồn tin ${sourceName}. Trình bày dạng danh sách đánh số ngắn gọn, kèm tiêu đề ngắn.`;
-    const aiRes = await askGroq(prompt);
-    if (aiRes.text) {
-      return `📰 **TIN MỚI TỪ ${sourceName.toUpperCase()} (Cập nhật AI)**:\n${aiRes.text}`;
-    }
-  } catch (e) {
-    console.error("Lỗi AI Fallback:", e.message);
-  }
-  return `⚠️ Không thể lấy tin từ ${sourceName}.`;
 }
 
 async function getAllLatestNews() {
+  // Lấy dữ liệu song song từ cả 3 trang báo, trang nào chậm/lỗi tự động ngắt sau 5s
   const [vnexpress, dantri, h24] = await Promise.allSettled([
     getNewsFromSource('https://vnexpress.net/rss/tin-moi-nhat.rss', 'VnExpress', 3),
     getNewsFromSource('https://dantri.com.vn/rss/home.rss', 'Dân Trí', 3),
@@ -148,6 +135,7 @@ async function getAllLatestNews() {
 
 // --- HÀM LẤY THÔNG TIN THỜI TIẾT, BITCOIN, GIÁ VÀNG ---
 
+// 1. Lấy thời tiết TP. Vinh (Open-Meteo API)
 async function getWeatherVinh() {
   try {
     const url = 'https://api.open-meteo.com/v1/forecast?latitude=18.6734&longitude=105.6923&current_weather=true&timezone=Asia%2FHo_Chi_Minh';
@@ -162,6 +150,7 @@ async function getWeatherVinh() {
   }
 }
 
+// 2. Lấy giá Bitcoin (CoinGecko API)
 async function getBitcoinPrice() {
   try {
     const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,vnd';
@@ -178,6 +167,7 @@ async function getBitcoinPrice() {
   }
 }
 
+// 3. Lấy giá Vàng tại Việt Nam (AI Tra cứu)
 async function getGoldPrice() {
   try {
     const prompt = "Hãy tổng hợp ngắn gọn giá vàng SJC / PNJ mới nhất hôm nay tại Việt Nam. Chỉ đưa ra con số Mua vào - Bán ra ước tính trong 2 dòng, không giải thích dài dòng.";
@@ -210,6 +200,7 @@ async function controlCounter(action, counterKey) {
   }
 }
 
+// Menu tùy chọn tra cứu thông tin khi gõ /thongtin
 function getInfoMenuKeyboard() {
   return {
     inline_keyboard: [
@@ -225,7 +216,10 @@ function getInfoMenuKeyboard() {
 
 // --- TỰ ĐỘNG LẬP LỊCH BẢN TIN SÁNG LÚC 07:00 ---
 cron.schedule('0 7 * * *', async () => {
-  if (!ADMIN_CHAT_ID) return;
+  if (!ADMIN_CHAT_ID) {
+    console.log("Chưa cài đặt ADMIN_CHAT_ID để gửi bản tin.");
+    return;
+  }
 
   const weatherText = await getWeatherVinh();
   const btcText = await getBitcoinPrice();
@@ -263,6 +257,7 @@ async function handleCallbackQuery(callbackQuery) {
     await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, { callback_query_id: callbackQuery.id });
   } catch (e) {}
 
+  // Xử lý các nút bấm tra cứu thông tin
   if (data === 'info_weather') {
     await sendMessage(chatId, "⏳ Đang lấy thông tin thời tiết...");
     const weather = await getWeatherVinh();
@@ -297,6 +292,7 @@ async function handleCallbackQuery(callbackQuery) {
     const fullMsg = `📊 **BẢN TIN TỔNG HỢP HÔM NAY**\n\n${weather}\n\n${btc}\n\n${gold}`;
     await sendMessage(chatId, fullMsg);
   }
+  // Xử lý các nút bấm lấy số
   else if (data.startsWith('layso_')) {
     const deptId = data.replace('layso_', '');
     await sendMessage(chatId, "⏳ Đang cấp số thứ tự...");
@@ -313,6 +309,7 @@ async function handleCallbackQuery(callbackQuery) {
       await sendMessage(chatId, "❌ Không thể lấy số. Kiểm tra lại kết nối máy chủ.");
     }
   } 
+  // Xử lý các nút bấm gọi số
   else if (data.startsWith('goiso_')) {
     const counterKey = data.replace('goiso_', '');
     await sendMessage(chatId, `⏳ Đang gọi số cho quầy [${counterKey}]...`);
