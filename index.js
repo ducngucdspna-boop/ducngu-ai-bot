@@ -2,7 +2,7 @@ const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
 const cron = require('node-cron');
-const Parser = require('rss-parser');
+const Parser = require('rss-parser'); // Bổ sung RSS Parser
 
 const app = express();
 app.use(express.json());
@@ -83,13 +83,20 @@ async function askGroq(promptText) {
   }
 }
 
-// --- HÀM LẤY TIN TỨC TỪ 24H, DÂN TRÍ, VNEXPRESS ---
+// --- HÀM LẤY TIN TỨC TỪ VNEXPRESS, DÂN TRÍ, 24H ---
 async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
   try {
-    const feed = await parser.parseURL(rssUrl);
-    let resultText = `📰 **TIN MỚI TỪ ${sourceName.toUpperCase()}**:\n`;
-    const items = feed.items.slice(0, limit);
+    const feed = await parser.parseURL(rssUrl, {
+      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
+    });
     
+    let resultText = `📰 **TIN MỚI TỪ ${sourceName.toUpperCase()}**:\n`;
+    const items = feed.items ? feed.items.slice(0, limit) : [];
+    
+    if (items.length === 0) {
+      return `⚠️ Không tìm thấy bài viết mới từ ${sourceName}.`;
+    }
+
     items.forEach((item, index) => {
       const title = item.title ? item.title.trim() : 'Không có tiêu đề';
       const link = item.link ? item.link.trim() : '#';
@@ -99,23 +106,25 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
     return resultText;
   } catch (error) {
     console.error(`Lỗi đọc tin từ ${sourceName}:`, error.message);
-    return `⚠️ Không thể lấy tin tức từ ${sourceName}.`;
+    return `⚠️ Không thể kết nối lấy tin từ ${sourceName}.`;
   }
 }
 
 async function getAllLatestNews() {
   const vnexpressNews = await getNewsFromSource('https://vnexpress.net/rss/tin-moi-nhat.rss', 'VnExpress', 3);
-  const dantriNews = await getNewsFromSource('https://dantri.com.vn/rss/trangchu.rss', 'Dân Trí', 3);
+  const dantriNews = await getNewsFromSource('https://dantri.com.vn/rss/home.rss', 'Dân Trí', 3);
   const h24News = await getNewsFromSource('https://cdn.24h.com.vn/upload/rss/trangchu24h.rss', '24h.com.vn', 3);
 
   return `🔥 **CẬP NHẬT TIN TỨC NỔI BẬT HÔM NAY** 🔥\n\n` +
-         `${vnexpressNews}\n` +
-         `${dantriNews}\n` +
-         `${h24News}\n` +
+         `${vnexpressNews}\n\n` +
+         `${dantriNews}\n\n` +
+         `${h24News}\n\n` +
          `👉 *Bấm vào tiêu đề để xem bài viết chi tiết!*`;
 }
 
 // --- HÀM LẤY THÔNG TIN THỜI TIẾT, BITCOIN, GIÁ VÀNG ---
+
+// 1. Lấy thời tiết TP. Vinh (Open-Meteo API)
 async function getWeatherVinh() {
   try {
     const url = 'https://api.open-meteo.com/v1/forecast?latitude=18.6734&longitude=105.6923&current_weather=true&timezone=Asia%2FHo_Chi_Minh';
@@ -130,6 +139,7 @@ async function getWeatherVinh() {
   }
 }
 
+// 2. Lấy giá Bitcoin (CoinGecko API)
 async function getBitcoinPrice() {
   try {
     const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,vnd';
@@ -146,6 +156,7 @@ async function getBitcoinPrice() {
   }
 }
 
+// 3. Lấy giá Vàng tại Việt Nam (AI Tra cứu)
 async function getGoldPrice() {
   try {
     const prompt = "Hãy tổng hợp ngắn gọn giá vàng SJC / PNJ mới nhất hôm nay tại Việt Nam. Chỉ đưa ra con số Mua vào - Bán ra ước tính trong 2 dòng, không giải thích dài dòng.";
@@ -178,14 +189,14 @@ async function controlCounter(action, counterKey) {
   }
 }
 
-// Menu tùy chọn tra cứu thông tin
+// Menu tùy chọn tra cứu thông tin khi gõ /thongtin
 function getInfoMenuKeyboard() {
   return {
     inline_keyboard: [
       [{ text: "🌤️ Thời tiết TP. Vinh", callback_data: "info_weather" }],
       [{ text: "🪙 Giá Bitcoin hôm nay", callback_data: "info_btc" }],
       [{ text: "🏆 Giá Vàng Việt Nam", callback_data: "info_gold" }],
-      [{ text: "📰 Tin tức 24h, Dân trí, VnExpress", callback_data: "info_news" }],
+      [{ text: "📰 Tin tức 24h, Dân Trí, VnExpress", callback_data: "info_news" }],
       [{ text: "⏰ Nhắc nhở / Bấm số khám bệnh", callback_data: "info_layso" }],
       [{ text: "📊 Xem tất cả Bản tin tổng hợp", callback_data: "info_all" }]
     ]
@@ -235,6 +246,7 @@ async function handleCallbackQuery(callbackQuery) {
     await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, { callback_query_id: callbackQuery.id });
   } catch (e) {}
 
+  // Xử lý các nút bấm tra cứu thông tin
   if (data === 'info_weather') {
     await sendMessage(chatId, "⏳ Đang lấy thông tin thời tiết...");
     const weather = await getWeatherVinh();
@@ -268,7 +280,9 @@ async function handleCallbackQuery(callbackQuery) {
     const gold = await getGoldPrice();
     const fullMsg = `📊 **BẢN TIN TỔNG HỢP HÔM NAY**\n\n${weather}\n\n${btc}\n\n${gold}`;
     await sendMessage(chatId, fullMsg);
-  } else if (data.startsWith('layso_')) {
+  }
+  // Xử lý các nút bấm lấy số
+  else if (data.startsWith('layso_')) {
     const deptId = data.replace('layso_', '');
     await sendMessage(chatId, "⏳ Đang cấp số thứ tự...");
     const result = await createTicket(deptId);
@@ -283,7 +297,9 @@ async function handleCallbackQuery(callbackQuery) {
     } else {
       await sendMessage(chatId, "❌ Không thể lấy số. Kiểm tra lại kết nối máy chủ.");
     }
-  } else if (data.startsWith('goiso_')) {
+  } 
+  // Xử lý các nút bấm gọi số
+  else if (data.startsWith('goiso_')) {
     const counterKey = data.replace('goiso_', '');
     await sendMessage(chatId, `⏳ Đang gọi số cho quầy [${counterKey}]...`);
     const res = await controlCounter('call-next', counterKey);
@@ -319,8 +335,8 @@ app.post('/webhook', async (req, res) => {
         `👋 **TRỢ LÝ AI - CỦA NGỮ**\n\n` +
         "• Gõ `/thongtin1` để xem tin tức nóng nhất từ 24h, Dân Trí, VnExpress.\n" +
         "• Gõ `/thongtin` để xem Menu tra cứu Thời tiết, Bitcoin, Giá vàng & Lấy số.\n" +
-        "• Gõ `/layso` để mở danh sách bấm số.\n" +
-        "• Gõ `/goiso` để mở menu gọi số quầy."
+        "• Gõ `/layso` để mở nhanh danh sách bấm số.\n" +
+        "• Gõ `/goiso` để mở menu gọi số quầy màn hình."
       );
     } else if (userText.startsWith('/thongtin1')) {
       await sendMessage(chatId, "⏳ Đang cào tin tức mới nhất từ VnExpress, Dân Trí, 24h...");
