@@ -2,12 +2,19 @@ const express = require('express');
 const axios = require('axios');
 const FormData = require('form-data');
 const cron = require('node-cron');
-const Parser = require('rss-parser'); // Bổ sung RSS Parser
+const Parser = require('rss-parser');
 
 const app = express();
 app.use(express.json());
 
-const parser = new Parser();
+// Khởi tạo RSS Parser với Timeout 5000ms (5 giây) để tránh bị treo
+const parser = new Parser({
+  timeout: 5000,
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
+  }
+});
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -83,18 +90,15 @@ async function askGroq(promptText) {
   }
 }
 
-// --- HÀM LẤY TIN TỨC TỪ VNEXPRESS, DÂN TRÍ, 24H ---
+// --- HÀM LẤY TIN TỨC AN TOÀN CHỐNG HẰNG HỌC / TREO ---
 async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
   try {
-    const feed = await parser.parseURL(rssUrl, {
-      headers: { 'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64)' }
-    });
-    
+    const feed = await parser.parseURL(rssUrl);
     let resultText = `📰 **TIN MỚI TỪ ${sourceName.toUpperCase()}**:\n`;
     const items = feed.items ? feed.items.slice(0, limit) : [];
     
     if (items.length === 0) {
-      return `⚠️ Không tìm thấy bài viết mới từ ${sourceName}.`;
+      return `⚠️ Không có bài viết mới từ ${sourceName}.`;
     }
 
     items.forEach((item, index) => {
@@ -106,14 +110,21 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
     return resultText;
   } catch (error) {
     console.error(`Lỗi đọc tin từ ${sourceName}:`, error.message);
-    return `⚠️ Không thể kết nối lấy tin từ ${sourceName}.`;
+    return `⚠️ Không thể lấy tin từ ${sourceName} (Lỗi/Timeout).`;
   }
 }
 
 async function getAllLatestNews() {
-  const vnexpressNews = await getNewsFromSource('https://vnexpress.net/rss/tin-moi-nhat.rss', 'VnExpress', 3);
-  const dantriNews = await getNewsFromSource('https://dantri.com.vn/rss/home.rss', 'Dân Trí', 3);
-  const h24News = await getNewsFromSource('https://cdn.24h.com.vn/upload/rss/trangchu24h.rss', '24h.com.vn', 3);
+  // Lấy dữ liệu song song từ cả 3 trang báo, trang nào chậm/lỗi tự động ngắt sau 5s
+  const [vnexpress, dantri, h24] = await Promise.allSettled([
+    getNewsFromSource('https://vnexpress.net/rss/tin-moi-nhat.rss', 'VnExpress', 3),
+    getNewsFromSource('https://dantri.com.vn/rss/home.rss', 'Dân Trí', 3),
+    getNewsFromSource('https://cdn.24h.com.vn/upload/rss/trangchu24h.rss', '24h.com.vn', 3)
+  ]);
+
+  const vnexpressNews = vnexpress.status === 'fulfilled' ? vnexpress.value : '⚠️ Lỗi lấy tin VnExpress.';
+  const dantriNews = dantri.status === 'fulfilled' ? dantri.value : '⚠️ Lỗi lấy tin Dân Trí.';
+  const h24News = h24.status === 'fulfilled' ? h24.value : '⚠️ Lỗi lấy tin 24h.';
 
   return `🔥 **CẬP NHẬT TIN TỨC NỔI BẬT HÔM NAY** 🔥\n\n` +
          `${vnexpressNews}\n\n` +
