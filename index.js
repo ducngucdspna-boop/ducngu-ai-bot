@@ -25,8 +25,8 @@ const COUNTER_MAP = {
   'vienphi': 'cnt_9a545709',
   'yeucau': 'cnt_e6cce8f3',
   'uutien': 'cnt_0c9973ab',
-  'baohiem': 'cnt_997e7075',
-  'default': 'cnt_997e7075'
+  'baohiem': 'cnt_ca177a18',
+  'default': 'cnt_ca177a18'
 };
 
 // Hàm gửi tin nhắn Telegram
