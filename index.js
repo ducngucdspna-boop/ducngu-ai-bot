@@ -11,7 +11,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 // ⚠️ CẬP NHẬT LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY BẠN
-const HIS_BASE_URL = 'https://conservation-unknown-got-manga.trycloudflare.com';
+const HIS_BASE_URL = 'https://rides-coast-favourite-handbook.trycloudflare.com';
 
 // ID Chat Telegram của Bạn để nhận bản tin & nhắc nhở
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
