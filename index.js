@@ -7,7 +7,13 @@ const Parser = require('rss-parser');
 const app = express();
 app.use(express.json());
 
-const parser = new Parser();
+const parser = new Parser({
+  headers: {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+    'Accept': 'application/rss+xml, application/xml, text/xml, */*'
+  },
+  timeout: 8000
+});
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -83,37 +89,15 @@ async function askGroq(promptText) {
   }
 }
 
-// --- HÀM LẤY TIN TỨC CHỐNG CHẶN IP VỚI CORS PROXY ---
+// --- HÀM LẤY TIN TỨC TỪ RSS TRỰC TIẾP (CÓ FALLBACK AI) ---
 async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
   try {
-    let xmlData = '';
-
-    // Thử lấy trực tiếp trước
-    try {
-      const resDirect = await axios.get(rssUrl, {
-        timeout: 6000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-        }
-      });
-      xmlData = resDirect.data;
-    } catch (directErr) {
-      // Nếu trực tiếp bị kẹt/chặn IP (Lỗi Render), chuyển sang lấy qua AllOrigins Proxy
-      const proxyUrl = `https://api.allorigins.win/get?url=${encodeURIComponent(rssUrl)}`;
-      const resProxy = await axios.get(proxyUrl, { timeout: 8000 });
-      xmlData = resProxy.data?.contents;
-    }
-
-    if (!xmlData) {
-      return `⚠️ Không thể lấy tin từ ${sourceName}.`;
-    }
-
-    const feed = await parser.parseStringPromise(xmlData);
+    const feed = await parser.parseURL(rssUrl);
     let resultText = `📰 **TIN MỚI TỪ ${sourceName.toUpperCase()}**:\n`;
     const items = feed.items ? feed.items.slice(0, limit) : [];
 
     if (items.length === 0) {
-      return `⚠️ Không có bài viết mới từ ${sourceName}.`;
+      return await getNewsFallbackAI(sourceName);
     }
 
     items.forEach((item, index) => {
@@ -124,9 +108,24 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
 
     return resultText;
   } catch (error) {
-    console.error(`Lỗi đọc tin từ ${sourceName}:`, error.message);
-    return `⚠️ Không thể lấy tin từ ${sourceName}.`;
+    console.error(`Lỗi lấy RSS từ ${sourceName}:`, error.message);
+    // Khi RSS lỗi, tự động dùng AI tổng hợp tin của nguồn đó
+    return await getNewsFallbackAI(sourceName);
   }
+}
+
+// Hàm dự phòng bằng AI khi nguồn RSS bị chặn
+async function getNewsFallbackAI(sourceName) {
+  try {
+    const prompt = `Tổng hợp 3 tin tức nổi bật và quan trọng nhất hôm nay từ nguồn tin ${sourceName}. Trình bày dạng danh sách đánh số ngắn gọn, kèm tiêu đề ngắn.`;
+    const aiRes = await askGroq(prompt);
+    if (aiRes.text) {
+      return `📰 **TIN MỚI TỪ ${sourceName.toUpperCase()} (Cập nhật AI)**:\n${aiRes.text}`;
+    }
+  } catch (e) {
+    console.error("Lỗi AI Fallback:", e.message);
+  }
+  return `⚠️ Không thể lấy tin từ ${sourceName}.`;
 }
 
 async function getAllLatestNews() {
