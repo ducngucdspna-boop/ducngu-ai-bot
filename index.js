@@ -7,14 +7,8 @@ const Parser = require('rss-parser');
 const app = express();
 app.use(express.json());
 
-// Khởi tạo RSS Parser với Timeout 5000ms (5 giây) để tránh bị treo
-const parser = new Parser({
-  timeout: 5000,
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-  }
-});
+// Khởi tạo RSS Parser
+const parser = new Parser();
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
@@ -23,7 +17,7 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 // ⚠️ CẬP NHẬT LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY BẠN
 const HIS_BASE_URL = 'https://rides-coast-favourite-handbook.trycloudflare.com';
 
-// ID Chat Telegram của Bạn để nhận bản tin & nhắc nhở
+// ID Chat Telegram để nhận bản tin & nhắc nhở
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
 
 // Danh sách mã quầy tương ứng với từng hình thức khám
@@ -48,34 +42,7 @@ async function sendMessage(chatId, text, replyMarkup = null) {
     if (replyMarkup) {
       payload.reply_markup = replyMarkup;
     }
-    await axios.post(`${TELEGRAM_API}/sendMessage`, payload);
-  } catch (error) {
-    console.error('Lỗi gửi tin nhắn Telegram:', error.response?.data || error.message);
-  }
-}
-
-// Hàm gọi Groq AI
-async function askGroq(promptText) {
-  if (!GROQ_API_KEY) {
-    return { error: "Chưa cấu hình GROQ_API_KEY trên Render!" };
-  }
-
-  const cleanKey = GROQ_API_KEY.trim();
-
-  try {
-    const response = await axios.post(
-      'https://api.groq.com/openai/v1/chat/completions',
-      {
-        model: 'openai/gpt-oss-20b',
-        messages: [
-          { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },
-          { role: 'user', content: promptText }
-        ],
-        temperature: 0.7
-      },
-      {
-        headers: {
-          'Authorization': `Bearer ${cleanKey}`,
+    await axios.post(`${TELEGRAM_API}/sendMessage`, payload);   } catch (error) {     console.error('Lỗi gửi tin nhắn Telegram:', error.response?.data \vert{}\vert{} error.message);   } }  // Hàm gọi Groq AI async function askGroq(promptText) {   if (!GROQ_API_KEY) {     return { error: "Chưa cấu hình GROQ_API_KEY trên Render!" };   }    const cleanKey = GROQ_API_KEY.trim();    try {     const response = await axios.post(       'https://api.groq.com/openai/v1/chat/completions',       {         model: 'openai/gpt-oss-20b',         messages: [           { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },           { role: 'user', content: promptText }         ],         temperature: 0.7       },       {         headers: {           'Authorization': `Bearer ${cleanKey}`,
           'Content-Type': 'application/json'
         },
         timeout: 30000
@@ -90,53 +57,46 @@ async function askGroq(promptText) {
   }
 }
 
-// --- HÀM LẤY TIN TỨC AN TOÀN CHỐNG HẰNG HỌC / TREO (ĐÃ ĐƯỢC CẬP NHẬT CHO 24H) ---
+// --- HÀM LẤY TIN TỨC CHỐNG BLOCK & CHỐNG TIMEOUT CHO CẢ 3 TRANG ---
 async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
-  try {
-    let feed;
+  // Cấu hình Header giả lập trình duyệt Chrome xịn
+  const browserHeaders = {
+    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
+    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
+    'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+    'Cache-Control': 'no-cache'
+  };
 
-    // Xử lý riêng cho 24h.com.vn bằng Axios để tránh bị chặn IP/Header
-    if (rssUrl.includes('24h.com.vn')) {
-      const response = await axios.get(rssUrl, {
-        timeout: 5000,
-        headers: {
-          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
-          'Accept': 'application/rss+xml, application/xml, text/xml, */*',
-          'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
-          'Cache-Control': 'no-cache'
-        }
-      });
-      feed = await parser.parseStringPromise(response.data);
-    } else {
-      // Các trang VnExpress, Dân Trí dùng parseURL chuẩn
-      feed = await parser.parseURL(rssUrl);
-    }
+  try {
+    // Tăng timeout lên 10.000ms (10 giây) để tránh bị rớt kết nối khi 24h/Dân Trí phản hồi chậm
+    const response = await axios.get(rssUrl, {
+      timeout: 10000,
+      headers: {
+        ...browserHeaders,
+        'Referer': rssUrl.includes('24h.com.vn') ? 'https://www.24h.com.vn/' : 
+                   rssUrl.includes('dantri.com.vn') ? 'https://dantri.com.vn/' : 'https://vnexpress.net/'
+      }
+    });
+
+    const feed = await parser.parseStringPromise(response.data);
 
     let resultText = `📰 **TIN MỚI TỪ ${sourceName.toUpperCase()}**:\n`;
     const items = feed.items ? feed.items.slice(0, limit) : [];
     
     if (items.length === 0) {
-      return `⚠️ Không có bài viết mới từ ${sourceName}.`;
-    }
-
-    items.forEach((item, index) => {
-      const title = item.title ? item.title.trim() : 'Không có tiêu đề';
-      const link = item.link ? item.link.trim() : '#';
-      resultText += `${index + 1}. [${title}](${link})\n`;
+      return `⚠️ Không có bài viết mới từ ${sourceName}.`;     }      items.forEach((item, index) => {       const title = item.title ? item.title.trim() : 'Không có tiêu đề';       const link = item.link ? item.link.trim() : '#';       resultText += `${index + 1}. [${title}](${link})\n`;
     });
     
     return resultText;
   } catch (error) {
     console.error(`Lỗi đọc tin từ ${sourceName}:`, error.message);
 
-    // Dự phòng đường dẫn RSS phụ của 24h trong trường hợp luồng chính bị lỗi
+    // Luồng dự phòng riêng cho 24h.com.vn nếu nguồn chính bị ngắt
     if (rssUrl.includes('24h.com.vn')) {
       try {
         const fallbackRes = await axios.get('https://cdn.24h.com.vn/upload/rss/tintuctrongngay.rss', {
-          timeout: 5000,
-          headers: {
-            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
-          }
+          timeout: 8000,
+          headers: { ...browserHeaders, 'Referer': 'https://www.24h.com.vn/' }
         });
         const fallbackFeed = await parser.parseStringPromise(fallbackRes.data);
         let resultText = `📰 **TIN MỚI TỪ 24H.COM.VN**:\n`;
@@ -146,7 +106,26 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
         });
         return resultText;
       } catch (e) {
-        // Ignored
+        console.error("Lỗi dự phòng 24h:", e.message);
+      }
+    }
+
+    // Luồng dự phòng cho Dân Trí nếu RSS chính gặp sự cố
+    if (rssUrl.includes('dantri.com.vn')) {
+      try {
+        const fallbackRes = await axios.get('https://dantri.com.vn/rss/xa-hoi.rss', {
+          timeout: 8000,
+          headers: { ...browserHeaders, 'Referer': 'https://dantri.com.vn/' }
+        });
+        const fallbackFeed = await parser.parseStringPromise(fallbackRes.data);
+        let resultText = `📰 **TIN MỚI TỪ DÂN TRÍ**:\n`;
+        const items = fallbackFeed.items ? fallbackFeed.items.slice(0, limit) : [];
+        items.forEach((item, index) => {
+          resultText += `${index + 1}. [${item.title.trim()}](${item.link.trim()})\n`;
+        });
+        return resultText;
+      } catch (e) {
+        console.error("Lỗi dự phòng Dân Trí:", e.message);
       }
     }
 
@@ -155,11 +134,11 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
 }
 
 async function getAllLatestNews() {
-  // Lấy dữ liệu song song từ cả 3 trang báo, trang nào chậm/lỗi tự động ngắt sau 5s
+  // Lấy dữ liệu song song từ cả 3 trang báo
   const [vnexpress, dantri, h24] = await Promise.allSettled([
     getNewsFromSource('https://vnexpress.net/rss/tin-moi-nhat.rss', 'VnExpress', 3),
     getNewsFromSource('https://dantri.com.vn/rss/home.rss', 'Dân Trí', 3),
-    getNewsFromSource('https://cdn.24h.com.vn/upload/rss/tintuctrongngay.rss', '24h.com.vn', 3)
+    getNewsFromSource('https://cdn.24h.com.vn/upload/rss/trangchu.rss', '24h.com.vn', 3)
   ]);
 
   const vnexpressNews = vnexpress.status === 'fulfilled' ? vnexpress.value : '⚠️ Lỗi lấy tin VnExpress.';
@@ -168,8 +147,7 @@ async function getAllLatestNews() {
 
   return `🔥 **CẬP NHẬT TIN TỨC NỔI BẬT HÔM NAY** 🔥\n\n` +
          `${vnexpressNews}\n\n` +
-         `${dantriNews}\n\n` +
-         `${h24News}\n\n` +
+         `${dantriNews}\n\n` +          `${h24News}\n\n` +
          `👉 *Bấm vào tiêu đề để xem bài viết chi tiết!*`;
 }
 
@@ -221,18 +199,7 @@ async function getGoldPrice() {
 // --- API LẤY SỐ MỚI & ĐIỀU KHIỂN QUẦY ---
 async function createTicket(departmentId) {
   try {
-    const res = await axios.post(`${HIS_BASE_URL}/api/tickets`, { departmentId }, { timeout: 10000 });
-    return res.data;
-  } catch (error) {
-    console.error("Lỗi POST /api/tickets:", error.message);
-    return null;
-  }
-}
-
-async function controlCounter(action, counterKey) {
-  const counterId = COUNTER_MAP[counterKey?.toLowerCase()] || counterKey || COUNTER_MAP['default'];
-  try {
-    const res = await axios.post(`${HIS_BASE_URL}/api/counters/${counterId}/${action}`, {}, { timeout: 10000 });
+    const res = await axios.post(`${HIS_BASE_URL}/api/tickets`, { departmentId }, { timeout: 10000 });     return res.data;   } catch (error) {     console.error("Lỗi POST /api/tickets:", error.message);     return null;   } }  async function controlCounter(action, counterKey) {   const counterId = COUNTER_MAP[counterKey?.toLowerCase()] \vert{}\vert{} counterKey \vert{}\vert{} COUNTER_MAP['default'];   try {     const res = await axios.post(`${HIS_BASE_URL}/api/counters/${counterId}/${action}`, {}, { timeout: 10000 });
     return { data: res.data, counterId };
   } catch (error) {
     console.error(`Lỗi thao tác quầy (${action}):`, error.message);
@@ -276,25 +243,8 @@ cron.schedule('0 7 * * *', async () => {
 
   const morningMessage = 
     "☀️ **BẢN TIN SÁNG & NHẮC NHỞ ĐẦU NGÀY** ☀️\n\n" +
-    `${weatherText}\n\n` +
-    `${btcText}\n\n` +
-    `${goldText}\n\n` +
-    "───────────────────\n" +
-    "⏰ **NHẮC NHỞ LẤY SỐ KHÁM BỆNH:**\n" +
-    "Đã đến giờ mở sổ bấm số ngày mới. Bấm chọn đối tượng bên dưới để cấp số mở hàng:";
-
-  await sendMessage(ADMIN_CHAT_ID, morningMessage, keyboard);
-}, {
-  timezone: "Asia/Ho_Chi_Minh"
-});
-
-// --- XỬ LÝ SỰ KIỆN BẤM NÚT TELEGRAM ---
-async function handleCallbackQuery(callbackQuery) {
-  const chatId = callbackQuery.message.chat.id;
-  const data = callbackQuery.data;
-
-  try {
-    await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, { callback_query_id: callbackQuery.id });
+    `${weatherText}\n\n` +     `${btcText}\n\n` +
+    `${goldText}\n\n` +     "───────────────────\n" +     "⏰ **NHẮC NHỞ LẤY SỐ KHÁM BỆNH:**\n" +     "Đã đến giờ mở sổ bấm số ngày mới. Bấm chọn đối tượng bên dưới để cấp số mở hàng:";    await sendMessage(ADMIN_CHAT_ID, morningMessage, keyboard); }, {   timezone: "Asia/Ho_Chi_Minh" });  // --- XỬ LÝ SỰ KIỆN BẤM NÚT TELEGRAM --- async function handleCallbackQuery(callbackQuery) {   const chatId = callbackQuery.message.chat.id;   const data = callbackQuery.data;    try {     await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, { callback_query_id: callbackQuery.id });
   } catch (e) {}
 
   // Xử lý các nút bấm tra cứu thông tin
