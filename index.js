@@ -1,6 +1,6 @@
+require('dotenv').config();
 const express = require('express');
 const axios = require('axios');
-const FormData = require('form-data');
 const cron = require('node-cron');
 const Parser = require('rss-parser');
 
@@ -16,15 +16,16 @@ const parser = new Parser({
   }
 });
 
-const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
-const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN ? process.env.TELEGRAM_TOKEN.trim() : '';
+const GROQ_API_KEY = process.env.GROQ_API_KEY ? process.env.GROQ_API_KEY.trim() : '';
+const KIOSK_TOKEN = process.env.KIOSK_TOKEN ? process.env.KIOSK_TOKEN.trim() : 'TELEGRAM_BOT_SECRET';
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 // ⚠️ CẬP NHẬT LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY BẠN
-const HIS_BASE_URL = 'https://harvey-linked-strain-generator.trycloudflare.com';
+const HIS_BASE_URL = (process.env.HIS_BASE_URL || 'https://harvey-linked-strain-generator.trycloudflare.com').replace(/\/$/, '');
 
 // ID Chat Telegram của Bạn để nhận bản tin & nhắc nhở
-const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
+const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID ? process.env.ADMIN_CHAT_ID.trim() : '';
 
 // Danh sách mã quầy tương ứng với từng hình thức khám
 const COUNTER_MAP = {
@@ -54,19 +55,17 @@ async function sendMessage(chatId, text, replyMarkup = null) {
   }
 }
 
-// Hàm gọi Groq AI
+// Hàm gọi Groq AI (Cập nhật model mới nhất llama-3.1-8b-instant)
 async function askGroq(promptText) {
   if (!GROQ_API_KEY) {
-    return { error: "Chưa cấu hình GROQ_API_KEY trên Render!" };
+    return { error: "Chưa cấu hình GROQ_API_KEY!" };
   }
-
-  const cleanKey = GROQ_API_KEY.trim();
 
   try {
     const response = await axios.post(
       'https://api.groq.com/openai/v1/chat/completions',
       {
-        model: 'openai/gpt-oss-20b',
+        model: 'llama-3.1-8b-instant',
         messages: [
           { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },
           { role: 'user', content: promptText }
@@ -75,10 +74,10 @@ async function askGroq(promptText) {
       },
       {
         headers: {
-          'Authorization': `Bearer ${cleanKey}`,
+          'Authorization': `Bearer ${GROQ_API_KEY}`,
           'Content-Type': 'application/json'
         },
-        timeout: 30000
+        timeout: 15000
       }
     );
     const content = response.data?.choices?.[0]?.message?.content?.trim();
@@ -90,12 +89,11 @@ async function askGroq(promptText) {
   }
 }
 
-// --- HÀM LẤY TIN TỨC AN TOÀN CHỐNG HẰNG HỌC / TREO (ĐÃ ĐƯỢC CẬP NHẬT CHO 24H) ---
+// --- HÀM LẤY TIN TỨC AN TOÀN ---
 async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
   try {
     let feed;
 
-    // Xử lý riêng cho 24h.com.vn bằng Axios để tránh bị chặn IP/Header
     if (rssUrl.includes('24h.com.vn')) {
       const response = await axios.get(rssUrl, {
         timeout: 5000,
@@ -108,13 +106,12 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
       });
       feed = await parser.parseStringPromise(response.data);
     } else {
-      // Các trang VnExpress, Dân Trí dùng parseURL chuẩn
       feed = await parser.parseURL(rssUrl);
     }
 
     let resultText = `📰 **TIN MỚI TỪ ${sourceName.toUpperCase()}**:\n`;
     const items = feed.items ? feed.items.slice(0, limit) : [];
-    
+
     if (items.length === 0) {
       return `⚠️ Không có bài viết mới từ ${sourceName}.`;
     }
@@ -124,12 +121,11 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
       const link = item.link ? item.link.trim() : '#';
       resultText += `${index + 1}. [${title}](${link})\n`;
     });
-    
+
     return resultText;
   } catch (error) {
     console.error(`Lỗi đọc tin từ ${sourceName}:`, error.message);
 
-    // Dự phòng đường dẫn RSS phụ của 24h trong trường hợp luồng chính bị lỗi
     if (rssUrl.includes('24h.com.vn')) {
       try {
         const fallbackRes = await axios.get('https://cdn.24h.com.vn/upload/rss/tintuctrongngay.rss', {
@@ -155,7 +151,6 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
 }
 
 async function getAllLatestNews() {
-  // Lấy dữ liệu song song từ cả 3 trang báo, trang nào chậm/lỗi tự động ngắt sau 5s
   const [vnexpress, dantri, h24] = await Promise.allSettled([
     getNewsFromSource('https://vnexpress.net/rss/tin-moi-nhat.rss', 'VnExpress', 3),
     getNewsFromSource('https://dantri.com.vn/rss/home.rss', 'Dân Trí', 3),
@@ -173,9 +168,7 @@ async function getAllLatestNews() {
          `👉 *Bấm vào tiêu đề để xem bài viết chi tiết!*`;
 }
 
-// --- HÀM LẤY THÔNG TIN THỜI TIẾT, BITCOIN, GIÁ VÀNG ---
-
-// 1. Lấy thời tiết TP. Vinh (Open-Meteo API)
+// --- THỜI TIẾT, BITCOIN, GIÁ VÀNG ---
 async function getWeatherVinh() {
   try {
     const url = 'https://api.open-meteo.com/v1/forecast?latitude=18.6734&longitude=105.6923&current_weather=true&timezone=Asia%2FHo_Chi_Minh';
@@ -190,7 +183,6 @@ async function getWeatherVinh() {
   }
 }
 
-// 2. Lấy giá Bitcoin (CoinGecko API)
 async function getBitcoinPrice() {
   try {
     const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,vnd';
@@ -207,7 +199,6 @@ async function getBitcoinPrice() {
   }
 }
 
-// 3. Lấy giá Vàng tại Việt Nam (AI Tra cứu)
 async function getGoldPrice() {
   try {
     const prompt = "Hãy tổng hợp ngắn gọn giá vàng SJC / PNJ mới nhất hôm nay tại Việt Nam. Chỉ đưa ra con số Mua vào - Bán ra ước tính trong 2 dòng, không giải thích dài dòng.";
@@ -218,17 +209,61 @@ async function getGoldPrice() {
   }
 }
 
-// --- API LẤY SỐ MỚI & ĐIỀU KHIỂN QUẦY ---
+// --- TÍCH HỢP HỆ THỐNG XÁC THỰC VÀ LẤY KHOA ĐỘNG TỪ SERVER HIS ---
+
+// Lấy danh sách các Khoa/Hình thức khám trực tiếp từ HIS Server
+async function fetchDepartments() {
+  try {
+    const res = await axios.get(`${HIS_BASE_URL}/api/departments`, { timeout: 8000 });
+    return res.data || [];
+  } catch (error) {
+    console.error("Lỗi lấy danh sách Khoa từ HIS:", error.message);
+    return [];
+  }
+}
+
+// Dựng bàn phím Inline Lấy Số Động theo danh sách Khoa từ HIS
+async function getDepartmentKeyboard() {
+  const depts = await fetchDepartments();
+  if (!depts || depts.length === 0) {
+    // Dự phòng khi không kết nối được tới HIS
+    return {
+      inline_keyboard: [
+        [{ text: "🛡️ Bảo hiểm y tế", callback_data: "layso_dept_bh" }],
+        [{ text: "💵 Viện phí", callback_data: "layso_dept_vp" }],
+        [{ text: "⭐ Khám theo yêu cầu", callback_data: "layso_dept_yc" }],
+        [{ text: "❤️ Ưu tiên", callback_data: "layso_dept_ut" }]
+      ]
+    };
+  }
+
+  const buttons = depts.map(dept => [{
+    text: `🏥 ${dept.name} (${dept.prefix})`,
+    callback_data: `layso_${dept.id}`
+  }]);
+
+  return { inline_keyboard: buttons };
+}
+
+// Tạo vé/số mới (Gửi kèm KIOSK_TOKEN ở Header x-kiosk-token)
 async function createTicket(departmentId) {
   try {
-    const res = await axios.post(`${HIS_BASE_URL}/api/tickets`, { departmentId }, { timeout: 10000 });
+    const res = await axios.post(
+      `${HIS_BASE_URL}/api/tickets`,
+      { departmentId },
+      {
+        headers: { 'x-kiosk-token': KIOSK_TOKEN },
+        timeout: 10000
+      }
+    );
     return res.data;
   } catch (error) {
-    console.error("Lỗi POST /api/tickets:", error.message);
+    console.error("Lỗi POST /api/tickets:", error.response?.data || error.message);
     return null;
   }
 }
 
+// Điều khiển gọi số tại Quầy
 async function controlCounter(action, counterKey) {
   const counterId = COUNTER_MAP[counterKey?.toLowerCase()] || counterKey || COUNTER_MAP['default'];
   try {
@@ -240,7 +275,7 @@ async function controlCounter(action, counterKey) {
   }
 }
 
-// Menu tùy chọn tra cứu thông tin khi gõ /thongtin
+// Menu tra cứu thông tin
 function getInfoMenuKeyboard() {
   return {
     inline_keyboard: [
@@ -264,15 +299,7 @@ cron.schedule('0 7 * * *', async () => {
   const weatherText = await getWeatherVinh();
   const btcText = await getBitcoinPrice();
   const goldText = await getGoldPrice();
-
-  const keyboard = {
-    inline_keyboard: [
-      [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
-      [{ text: "💵 Viện phí (dept_vp)", callback_data: "layso_dept_vp" }],
-      [{ text: "⭐ Khám theo yêu cầu (dept_yc)", callback_data: "layso_dept_yc" }],
-      [{ text: "❤️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
-    ]
-  };
+  const keyboard = await getDepartmentKeyboard();
 
   const morningMessage = 
     "☀️ **BẢN TIN SÁNG & NHẮC NHỞ ĐẦU NGÀY** ☀️\n\n" +
@@ -297,7 +324,6 @@ async function handleCallbackQuery(callbackQuery) {
     await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, { callback_query_id: callbackQuery.id });
   } catch (e) {}
 
-  // Xử lý các nút bấm tra cứu thông tin
   if (data === 'info_weather') {
     await sendMessage(chatId, "⏳ Đang lấy thông tin thời tiết...");
     const weather = await getWeatherVinh();
@@ -315,14 +341,7 @@ async function handleCallbackQuery(callbackQuery) {
     const news = await getAllLatestNews();
     await sendMessage(chatId, news);
   } else if (data === 'info_layso') {
-    const keyboard = {
-      inline_keyboard: [
-        [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
-        [{ text: "💵 Viện phí (dept_vp)", callback_data: "layso_dept_vp" }],
-        [{ text: "⭐ Khám theo yêu cầu (dept_yc)", callback_data: "layso_dept_yc" }],
-        [{ text: "❤️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
-      ]
-    };
+    const keyboard = await getDepartmentKeyboard();
     await sendMessage(chatId, "⏰ **BẤM SỐ KHÁM BỆNH:** Vui lòng chọn đối tượng bên dưới:", keyboard);
   } else if (data === 'info_all') {
     await sendMessage(chatId, "⏳ Đang tổng hợp bản tin...");
@@ -332,24 +351,23 @@ async function handleCallbackQuery(callbackQuery) {
     const fullMsg = `📊 **BẢN TIN TỔNG HỢP HÔM NAY**\n\n${weather}\n\n${btc}\n\n${goldText}`;
     await sendMessage(chatId, fullMsg);
   }
-  // Xử lý các nút bấm lấy số
   else if (data.startsWith('layso_')) {
     const deptId = data.replace('layso_', '');
-    await sendMessage(chatId, "⏳ Đang cấp số thứ tự...");
+    await sendMessage(chatId, "⏳ Đang kết nối máy chủ HIS cấp số thứ tự...");
     const result = await createTicket(deptId);
-    if (result && result.code) {
+    if (result && (result.code || result.number)) {
+      const ticketNum = result.code || result.number;
       await sendMessage(
         chatId,
         `🎉 **CẤP SỐ THÀNH CÔNG!**\n\n` +
-        `🏥 **Đối tượng:** ${result.departmentName || deptId}\n` +
-        `🔢 **Số thứ tự:** \`${result.code}\`\n` +
+        `🏥 **Đối tượng/Khoa:** ${result.departmentName || result.departmentId || 'Khám bệnh'}\n` +
+        `🔢 **Số thứ tự:** \`${ticketNum}\`\n` +
         `👥 **Đang chờ phía trước:** \`${result.waitingAhead || 0}\` người`
       );
     } else {
-      await sendMessage(chatId, "❌ Không thể lấy số. Kiểm tra lại kết nối máy chủ.");
+      await sendMessage(chatId, "❌ Không thể lấy số. Kiểm tra lại kết nối HIS Server hoặc Mã Token.");
     }
   } 
-  // Xử lý các nút bấm gọi số
   else if (data.startsWith('goiso_')) {
     const counterKey = data.replace('goiso_', '');
     await sendMessage(chatId, `⏳ Đang gọi số cho quầy [${counterKey}]...`);
@@ -357,7 +375,8 @@ async function handleCallbackQuery(callbackQuery) {
     if (res?.data?.empty) {
       await sendMessage(chatId, `⚠️ **Hàng đợi trống!** Không có bệnh nhân nào đang chờ.`);
     } else if (res?.data?.ticket) {
-      await sendMessage(chatId, `📢 **ĐÃ GỌI SỐ:** \`${res.data.ticket.code}\` lên màn hình quầy \`${res.counterId}\`!`);
+      const ticketNum = res.data.ticket.code || res.data.ticket.number;
+      await sendMessage(chatId, `📢 **ĐÃ GỌI SỐ:** \`${ticketNum}\` lên màn hình quầy \`${res.counterId}\`!`);
     } else {
       await sendMessage(chatId, "❌ Thao tác gọi số thất bại.");
     }
@@ -402,21 +421,16 @@ app.post('/webhook', async (req, res) => {
     } else if (userText.startsWith('/layso')) {
       const param = userText.replace('/layso', '').trim();
       if (!param) {
-        const keyboard = {
-          inline_keyboard: [
-            [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
-            [{ text: "💵 Viện phí (dept_vp)", callback_data: "layso_dept_vp" }],
-            [{ text: "⭐ Khám theo yêu cầu (dept_yc)", callback_data: "layso_dept_yc" }],
-            [{ text: "❤️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
-          ]
-        };
+        const keyboard = await getDepartmentKeyboard();
         await sendMessage(chatId, "🏥 **CHỌN ĐỐI TƯỢNG ĐỂ BẤM LẤY SỐ:**", keyboard);
       } else {
+        await sendMessage(chatId, "⏳ Đang kết nối HIS cấp số...");
         const result = await createTicket(param);
-        if (result && result.code) {
-          await sendMessage(chatId, `🎉 **CẤP SỐ THÀNH CÔNG!** Số: \`${result.code}\``);
+        if (result && (result.code || result.number)) {
+          const ticketNum = result.code || result.number;
+          await sendMessage(chatId, `🎉 **CẤP SỐ THÀNH CÔNG!** Số: \`${ticketNum}\``);
         } else {
-          await sendMessage(chatId, "❌ Lỗi cấp số.");
+          await sendMessage(chatId, "❌ Lỗi cấp số. Kiểm tra lại ID Khoa hoặc mã Token.");
         }
       }
     } else if (userText.startsWith('/goiso')) {
@@ -434,7 +448,8 @@ app.post('/webhook', async (req, res) => {
       } else {
         const res = await controlCounter('call-next', counterKey);
         if (res?.data?.ticket) {
-          await sendMessage(chatId, `📢 **ĐÃ GỌI SỐ:** \`${res.data.ticket.code}\`!`);
+          const ticketNum = res.data.ticket.code || res.data.ticket.number;
+          await sendMessage(chatId, `📢 **ĐÃ GỌI SỐ:** \`${ticketNum}\`!`);
         } else {
           await sendMessage(chatId, "⚠️ Hàng đợi trống hoặc không thể gọi.");
         }
