@@ -90,10 +90,28 @@ async function askGroq(promptText) {
   }
 }
 
-// --- HÀM LẤY TIN TỨC AN TOÀN CHỐNG HẰNG HỌC / TREO ---
+// --- HÀM LẤY TIN TỨC AN TOÀN CHỐNG HẰNG HỌC / TREO (ĐÃ ĐƯỢC CẬP NHẬT CHO 24H) ---
 async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
   try {
-    const feed = await parser.parseURL(rssUrl);
+    let feed;
+
+    // Xử lý riêng cho 24h.com.vn bằng Axios để tránh bị chặn IP/Header
+    if (rssUrl.includes('24h.com.vn')) {
+      const response = await axios.get(rssUrl, {
+        timeout: 5000,
+        headers: {
+          'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+          'Accept': 'application/rss+xml, application/xml, text/xml, */*',
+          'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7',
+          'Cache-Control': 'no-cache'
+        }
+      });
+      feed = await parser.parseStringPromise(response.data);
+    } else {
+      // Các trang VnExpress, Dân Trí dùng parseURL chuẩn
+      feed = await parser.parseURL(rssUrl);
+    }
+
     let resultText = `📰 **TIN MỚI TỪ ${sourceName.toUpperCase()}**:\n`;
     const items = feed.items ? feed.items.slice(0, limit) : [];
     
@@ -110,6 +128,28 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
     return resultText;
   } catch (error) {
     console.error(`Lỗi đọc tin từ ${sourceName}:`, error.message);
+
+    // Dự phòng đường dẫn RSS phụ của 24h trong trường hợp luồng chính bị lỗi
+    if (rssUrl.includes('24h.com.vn')) {
+      try {
+        const fallbackRes = await axios.get('https://cdn.24h.com.vn/upload/rss/tintuctrongngay.rss', {
+          timeout: 5000,
+          headers: {
+            'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36'
+          }
+        });
+        const fallbackFeed = await parser.parseStringPromise(fallbackRes.data);
+        let resultText = `📰 **TIN MỚI TỪ 24H.COM.VN**:\n`;
+        const items = fallbackFeed.items ? fallbackFeed.items.slice(0, limit) : [];
+        items.forEach((item, index) => {
+          resultText += `${index + 1}. [${item.title.trim()}](${item.link.trim()})\n`;
+        });
+        return resultText;
+      } catch (e) {
+        // Ignored
+      }
+    }
+
     return `⚠️ Không thể lấy tin từ ${sourceName} (Lỗi/Timeout).`;
   }
 }
@@ -119,7 +159,7 @@ async function getAllLatestNews() {
   const [vnexpress, dantri, h24] = await Promise.allSettled([
     getNewsFromSource('https://vnexpress.net/rss/tin-moi-nhat.rss', 'VnExpress', 3),
     getNewsFromSource('https://dantri.com.vn/rss/home.rss', 'Dân Trí', 3),
-    getNewsFromSource('https://cdn.24h.com.vn/upload/rss/trangchu24h.rss', '24h.com.vn', 3)
+    getNewsFromSource('https://cdn.24h.com.vn/upload/rss/tintuctrongngay.rss', '24h.com.vn', 3)
   ]);
 
   const vnexpressNews = vnexpress.status === 'fulfilled' ? vnexpress.value : '⚠️ Lỗi lấy tin VnExpress.';
@@ -288,8 +328,8 @@ async function handleCallbackQuery(callbackQuery) {
     await sendMessage(chatId, "⏳ Đang tổng hợp bản tin...");
     const weather = await getWeatherVinh();
     const btc = await getBitcoinPrice();
-    const gold = await getGoldPrice();
-    const fullMsg = `📊 **BẢN TIN TỔNG HỢP HÔM NAY**\n\n${weather}\n\n${btc}\n\n${gold}`;
+    const goldText = await getGoldPrice();
+    const fullMsg = `📊 **BẢN TIN TỔNG HỢP HÔM NAY**\n\n${weather}\n\n${btc}\n\n${goldText}`;
     await sendMessage(chatId, fullMsg);
   }
   // Xử lý các nút bấm lấy số
