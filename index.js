@@ -12,9 +12,10 @@ const parser = new Parser();
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const KIOSK_TOKEN = process.env.KIOSK_TOKEN || '';
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
-// ⚠️ CẬP NHẬT LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY BẠN
+// ⚠️ CẬP NHẬT LINK CLOUDFLARE TUNNEL (Đã xóa khoảng trắng thừa)
 const HIS_BASE_URL = 'https://puzzle-consumers-bolt-patient.trycloudflare.com';
 
 // ID Chat Telegram để nhận bản tin & nhắc nhở
@@ -29,6 +30,18 @@ const COUNTER_MAP = {
   'default': 'cnt_ca177a18'
 };
 
+// Menu lấy số với ID khoa/đối tượng chuẩn
+function getLaySoKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "🛡️ Bảo hiểm y tế", callback_data: "layso_dep_baohiem_id" }],
+      [{ text: "💵 Viện phí", callback_data: "layso_dep_vienphi_id" }],
+      [{ text: "⭐ Khám theo yêu cầu", callback_data: "layso_dep_yeucau_id" }],
+      [{ text: "❤️ Ưu tiên", callback_data: "layso_dep_uutien_id" }]
+    ]
+  };
+}
+
 // Hàm gửi tin nhắn Telegram
 async function sendMessage(chatId, text, replyMarkup = null) {
   if (!chatId) return;
@@ -42,7 +55,32 @@ async function sendMessage(chatId, text, replyMarkup = null) {
     if (replyMarkup) {
       payload.reply_markup = replyMarkup;
     }
-    await axios.post(`${TELEGRAM_API}/sendMessage`, payload);   } catch (error) {     console.error('Lỗi gửi tin nhắn Telegram:', error.response?.data \vert{}\vert{} error.message);   } }  // Hàm gọi Groq AI async function askGroq(promptText) {   if (!GROQ_API_KEY) {     return { error: "Chưa cấu hình GROQ_API_KEY trên Render!" };   }    const cleanKey = GROQ_API_KEY.trim();    try {     const response = await axios.post(       'https://api.groq.com/openai/v1/chat/completions',       {         model: 'openai/gpt-oss-20b',         messages: [           { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },           { role: 'user', content: promptText }         ],         temperature: 0.7       },       {         headers: {           'Authorization': `Bearer ${cleanKey}`,
+    await axios.post(`${TELEGRAM_API}/sendMessage`, payload);
+  } catch (error) {
+    console.error('Lỗi gửi tin nhắn Telegram:', error.response?.data || error.message);
+  }
+}
+
+// Hàm gọi Groq AI
+async function askGroq(promptText) {
+  if (!GROQ_API_KEY) {
+    return { error: "Chưa cấu hình GROQ_API_KEY trên Render!" };
+  }
+  const cleanKey = GROQ_API_KEY.trim();
+  try {
+    const response = await axios.post(
+      'https://api.groq.com/openai/v1/chat/completions',
+      {
+        model: 'openai/gpt-oss-20b',
+        messages: [
+          { role: 'system', content: 'Bạn là một trợ lý AI thông minh, lịch sự và trả lời bằng tiếng Việt.' },
+          { role: 'user', content: promptText }
+        ],
+        temperature: 0.7
+      },
+      {
+        headers: {
+          'Authorization': `Bearer ${cleanKey}`,
           'Content-Type': 'application/json'
         },
         timeout: 30000
@@ -57,9 +95,8 @@ async function sendMessage(chatId, text, replyMarkup = null) {
   }
 }
 
-// --- HÀM LẤY TIN TỨC CHỐNG BLOCK & CHỐNG TIMEOUT CHO CẢ 3 TRANG ---
+// --- HÀM LẤY TIN TỨC CHỐNG BLOCK & CHỐNG TIMEOUT ---
 async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
-  // Cấu hình Header giả lập trình duyệt Chrome xịn
   const browserHeaders = {
     'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/123.0.0.0 Safari/537.36',
     'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,*/*;q=0.8',
@@ -68,7 +105,6 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
   };
 
   try {
-    // Tăng timeout lên 10.000ms (10 giây) để tránh bị rớt kết nối khi 24h/Dân Trí phản hồi chậm
     const response = await axios.get(rssUrl, {
       timeout: 10000,
       headers: {
@@ -79,19 +115,22 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
     });
 
     const feed = await parser.parseStringPromise(response.data);
-
     let resultText = `📰 **TIN MỚI TỪ ${sourceName.toUpperCase()}**:\n`;
     const items = feed.items ? feed.items.slice(0, limit) : [];
     
     if (items.length === 0) {
-      return `⚠️ Không có bài viết mới từ ${sourceName}.`;     }      items.forEach((item, index) => {       const title = item.title ? item.title.trim() : 'Không có tiêu đề';       const link = item.link ? item.link.trim() : '#';       resultText += `${index + 1}. [${title}](${link})\n`;
+      return `⚠️ Không có bài viết mới từ ${sourceName}.`;
+    }
+    items.forEach((item, index) => {
+      const title = item.title ? item.title.trim() : 'Không có tiêu đề';
+      const link = item.link ? item.link.trim() : '#';
+      resultText += `${index + 1}. [${title}](${link})\n`;
     });
     
     return resultText;
   } catch (error) {
     console.error(`Lỗi đọc tin từ ${sourceName}:`, error.message);
 
-    // Luồng dự phòng riêng cho 24h.com.vn nếu nguồn chính bị ngắt
     if (rssUrl.includes('24h.com.vn')) {
       try {
         const fallbackRes = await axios.get('https://cdn.24h.com.vn/upload/rss/tintuctrongngay.rss', {
@@ -110,7 +149,6 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
       }
     }
 
-    // Luồng dự phòng cho Dân Trí nếu RSS chính gặp sự cố
     if (rssUrl.includes('dantri.com.vn')) {
       try {
         const fallbackRes = await axios.get('https://dantri.com.vn/rss/xa-hoi.rss', {
@@ -134,7 +172,6 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
 }
 
 async function getAllLatestNews() {
-  // Lấy dữ liệu song song từ cả 3 trang báo
   const [vnexpress, dantri, h24] = await Promise.allSettled([
     getNewsFromSource('https://vnexpress.net/rss/tin-moi-nhat.rss', 'VnExpress', 3),
     getNewsFromSource('https://dantri.com.vn/rss/home.rss', 'Dân Trí', 3),
@@ -147,13 +184,12 @@ async function getAllLatestNews() {
 
   return `🔥 **CẬP NHẬT TIN TỨC NỔI BẬT HÔM NAY** 🔥\n\n` +
          `${vnexpressNews}\n\n` +
-         `${dantriNews}\n\n` +          `${h24News}\n\n` +
+         `${dantriNews}\n\n` +
+         `${h24News}\n\n` +
          `👉 *Bấm vào tiêu đề để xem bài viết chi tiết!*`;
 }
 
 // --- HÀM LẤY THÔNG TIN THỜI TIẾT, BITCOIN, GIÁ VÀNG ---
-
-// 1. Lấy thời tiết TP. Vinh (Open-Meteo API)
 async function getWeatherVinh() {
   try {
     const url = 'https://api.open-meteo.com/v1/forecast?latitude=18.6734&longitude=105.6923&current_weather=true&timezone=Asia%2FHo_Chi_Minh';
@@ -168,7 +204,6 @@ async function getWeatherVinh() {
   }
 }
 
-// 2. Lấy giá Bitcoin (CoinGecko API)
 async function getBitcoinPrice() {
   try {
     const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,vnd';
@@ -185,7 +220,6 @@ async function getBitcoinPrice() {
   }
 }
 
-// 3. Lấy giá Vàng tại Việt Nam (AI Tra cứu)
 async function getGoldPrice() {
   try {
     const prompt = "Hãy tổng hợp ngắn gọn giá vàng SJC / PNJ mới nhất hôm nay tại Việt Nam. Chỉ đưa ra con số Mua vào - Bán ra ước tính trong 2 dòng, không giải thích dài dòng.";
@@ -196,10 +230,30 @@ async function getGoldPrice() {
   }
 }
 
-// --- API LẤY SỐ MỚI & ĐIỀU KHIỂN QUẦY ---
+// --- API LẤY SỐ MỚI & ĐIỀU KHIỂN QUẦY (ĐÃ BỔ SUNG HEADER & ERROR LOG) ---
 async function createTicket(departmentId) {
   try {
-    const res = await axios.post(`${HIS_BASE_URL}/api/tickets`, { departmentId }, { timeout: 10000 });     return res.data;   } catch (error) {     console.error("Lỗi POST /api/tickets:", error.message);     return null;   } }  async function controlCounter(action, counterKey) {   const counterId = COUNTER_MAP[counterKey?.toLowerCase()] \vert{}\vert{} counterKey \vert{}\vert{} COUNTER_MAP['default'];   try {     const res = await axios.post(`${HIS_BASE_URL}/api/counters/${counterId}/${action}`, {}, { timeout: 10000 });
+    const cleanUrl = HIS_BASE_URL.trim();
+    const res = await axios.post(
+      `${cleanUrl}/api/tickets`, 
+      { departmentId }, 
+      { 
+        headers: { 'x-kiosk-token': KIOSK_TOKEN },
+        timeout: 10000 
+      }
+    );
+    return res.data;
+  } catch (error) {
+    console.error("Lỗi POST /api/tickets:", error.response?.data || error.message);
+    return null;
+  }
+}
+
+async function controlCounter(action, counterKey) {
+  const counterId = COUNTER_MAP[counterKey?.toLowerCase()] || counterKey || COUNTER_MAP['default'];
+  try {
+    const cleanUrl = HIS_BASE_URL.trim();
+    const res = await axios.post(`${cleanUrl}/api/counters/${counterId}/${action}`, {}, { timeout: 10000 });
     return { data: res.data, counterId };
   } catch (error) {
     console.error(`Lỗi thao tác quầy (${action}):`, error.message);
@@ -232,22 +286,29 @@ cron.schedule('0 7 * * *', async () => {
   const btcText = await getBitcoinPrice();
   const goldText = await getGoldPrice();
 
-  const keyboard = {
-    inline_keyboard: [
-      [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
-      [{ text: "💵 Viện phí (dept_vp)", callback_data: "layso_dept_vp" }],
-      [{ text: "⭐ Khám theo yêu cầu (dept_yc)", callback_data: "layso_dept_yc" }],
-      [{ text: "❤️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
-    ]
-  };
-
   const morningMessage = 
     "☀️ **BẢN TIN SÁNG & NHẮC NHỞ ĐẦU NGÀY** ☀️\n\n" +
-    `${weatherText}\n\n` +     `${btcText}\n\n` +
-    `${goldText}\n\n` +     "───────────────────\n" +     "⏰ **NHẮC NHỞ LẤY SỐ KHÁM BỆNH:**\n" +     "Đã đến giờ mở sổ bấm số ngày mới. Bấm chọn đối tượng bên dưới để cấp số mở hàng:";    await sendMessage(ADMIN_CHAT_ID, morningMessage, keyboard); }, {   timezone: "Asia/Ho_Chi_Minh" });  // --- XỬ LÝ SỰ KIỆN BẤM NÚT TELEGRAM --- async function handleCallbackQuery(callbackQuery) {   const chatId = callbackQuery.message.chat.id;   const data = callbackQuery.data;    try {     await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, { callback_query_id: callbackQuery.id });
+    `${weatherText}\n\n` +
+    `${btcText}\n\n` +
+    `${goldText}\n\n` +
+    "───────────────────\n" +
+    "⏰ **NHẮC NHỞ LẤY SỐ KHÁM BỆNH:**\n" +
+    "Đã đến giờ mở sổ bấm số ngày mới. Bấm chọn đối tượng bên dưới để cấp số mở hàng:";
+    
+  await sendMessage(ADMIN_CHAT_ID, morningMessage, getLaySoKeyboard());
+}, {
+  timezone: "Asia/Ho_Chi_Minh"
+});
+
+// --- XỬ LÝ SỰ KIỆN BẤM NÚT TELEGRAM ---
+async function handleCallbackQuery(callbackQuery) {
+  const chatId = callbackQuery.message.chat.id;
+  const data = callbackQuery.data;
+
+  try {
+    await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, { callback_query_id: callbackQuery.id });
   } catch (e) {}
 
-  // Xử lý các nút bấm tra cứu thông tin
   if (data === 'info_weather') {
     await sendMessage(chatId, "⏳ Đang lấy thông tin thời tiết...");
     const weather = await getWeatherVinh();
@@ -265,15 +326,7 @@ cron.schedule('0 7 * * *', async () => {
     const news = await getAllLatestNews();
     await sendMessage(chatId, news);
   } else if (data === 'info_layso') {
-    const keyboard = {
-      inline_keyboard: [
-        [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
-        [{ text: "💵 Viện phí (dept_vp)", callback_data: "layso_dept_vp" }],
-        [{ text: "⭐ Khám theo yêu cầu (dept_yc)", callback_data: "layso_dept_yc" }],
-        [{ text: "❤️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
-      ]
-    };
-    await sendMessage(chatId, "⏰ **BẤM SỐ KHÁM BỆNH:** Vui lòng chọn đối tượng bên dưới:", keyboard);
+    await sendMessage(chatId, "⏰ **BẤM SỐ KHÁM BỆNH:** Vui lòng chọn đối tượng bên dưới:", getLaySoKeyboard());
   } else if (data === 'info_all') {
     await sendMessage(chatId, "⏳ Đang tổng hợp bản tin...");
     const weather = await getWeatherVinh();
@@ -282,7 +335,6 @@ cron.schedule('0 7 * * *', async () => {
     const fullMsg = `📊 **BẢN TIN TỔNG HỢP HÔM NAY**\n\n${weather}\n\n${btc}\n\n${goldText}`;
     await sendMessage(chatId, fullMsg);
   }
-  // Xử lý các nút bấm lấy số
   else if (data.startsWith('layso_')) {
     const deptId = data.replace('layso_', '');
     await sendMessage(chatId, "⏳ Đang cấp số thứ tự...");
@@ -299,7 +351,6 @@ cron.schedule('0 7 * * *', async () => {
       await sendMessage(chatId, "❌ Không thể lấy số. Kiểm tra lại kết nối máy chủ.");
     }
   } 
-  // Xử lý các nút bấm gọi số
   else if (data.startsWith('goiso_')) {
     const counterKey = data.replace('goiso_', '');
     await sendMessage(chatId, `⏳ Đang gọi số cho quầy [${counterKey}]...`);
@@ -352,15 +403,7 @@ app.post('/webhook', async (req, res) => {
     } else if (userText.startsWith('/layso')) {
       const param = userText.replace('/layso', '').trim();
       if (!param) {
-        const keyboard = {
-          inline_keyboard: [
-            [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
-            [{ text: "💵 Viện phí (dept_vp)", callback_data: "layso_dept_vp" }],
-            [{ text: "⭐ Khám theo yêu cầu (dept_yc)", callback_data: "layso_dept_yc" }],
-            [{ text: "❤️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
-          ]
-        };
-        await sendMessage(chatId, "🏥 **CHỌN ĐỐI TƯỢNG ĐỂ BẤM LẤY SỐ:**", keyboard);
+        await sendMessage(chatId, "🏥 **CHỌN ĐỐI TƯỢNG ĐỂ BẤM LẤY SỐ:**", getLaySoKeyboard());
       } else {
         const result = await createTicket(param);
         if (result && result.code) {
