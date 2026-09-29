@@ -11,7 +11,7 @@ const GROQ_API_KEY = process.env.GROQ_API_KEY;
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
 // ⚠️ CẬP NHẬT LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY BẠN
-const HIS_BASE_URL = ' https://rides-coast-favourite-handbook.trycloudflare.com';
+const HIS_BASE_URL = 'https://conservation-unknown-got-manga.trycloudflare.com';
 
 // ID Chat Telegram của Bạn để nhận bản tin & nhắc nhở
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
@@ -81,14 +81,14 @@ async function askGroq(promptText) {
 
 // --- HÀM LẤY THÔNG TIN THỜI TIẾT, BITCOIN, GIÁ VÀNG ---
 
-// 1. Lấy thời tiết TP. Vinh (Dùng Open-Meteo API miễn phí)
+// 1. Lấy thời tiết TP. Vinh (Open-Meteo API)
 async function getWeatherVinh() {
   try {
     const url = 'https://api.open-meteo.com/v1/forecast?latitude=18.6734&longitude=105.6923&current_weather=true&timezone=Asia%2FHo_Chi_Minh';
     const res = await axios.get(url, { timeout: 10000 });
     const weather = res.data?.current_weather;
     if (weather) {
-      return `🌤️ **Nhiệt độ:** ${weather.temperature}°C \vert{} **Tốc độ gió:** ${weather.windspeed} km/h`;
+      return `🌤️ **Thời tiết TP. Vinh - Nghệ An:**\n• Nhiệt độ: **${weather.temperature}°C**\n• Tốc độ gió: **${weather.windspeed} km/h**`;
     }
     return "⚠️ Không thể lấy thông tin thời tiết.";
   } catch (e) {
@@ -96,7 +96,7 @@ async function getWeatherVinh() {
   }
 }
 
-// 2. Lấy giá Bitcoin (Dùng CoinGecko API miễn phí)
+// 2. Lấy giá Bitcoin (CoinGecko API)
 async function getBitcoinPrice() {
   try {
     const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,vnd';
@@ -105,7 +105,7 @@ async function getBitcoinPrice() {
     if (btc) {
       const usd = btc.usd.toLocaleString('en-US');
       const vnd = btc.vnd.toLocaleString('vi-VN');
-      return `🪙 **BTC/USD:** $${usd}\n🇻🇳 **BTC/VND:** ${vnd} VNĐ`;
+      return `📈 **Giá Bitcoin hôm nay:**\n• BTC/USD: **$${usd}**\n• BTC/VND: **${vnd} VNĐ**`;
     }
     return "⚠️ Không thể lấy giá Bitcoin.";
   } catch (e) {
@@ -113,12 +113,12 @@ async function getBitcoinPrice() {
   }
 }
 
-// 3. Lấy thông tin giá Vàng từ AI / API công khai
+// 3. Lấy giá Vàng tại Việt Nam (AI Tra cứu)
 async function getGoldPrice() {
   try {
-    const prompt = "Hãy tổng hợp ngắn gọn giá vàng SJC (Mua vào - Bán ra) mới nhất hôm nay tại Việt Nam. Chỉ đưa ra con số ước tính ngắn gọn trong 2 dòng, không giải thích dài dòng.";
+    const prompt = "Hãy tổng hợp ngắn gọn giá vàng SJC / PNJ mới nhất hôm nay tại Việt Nam. Chỉ đưa ra con số Mua vào - Bán ra ước tính trong 2 dòng, không giải thích dài dòng.";
     const result = await askGroq(prompt);
-    return result.text || "⚠️ Chưa cập nhật được giá vàng.";
+    return `🏆 **Giá Vàng hôm nay tại Việt Nam:**\n${result.text || "⚠️ Chưa cập nhật được giá vàng."}`;
   } catch (e) {
     return "⚠️ Lỗi cập nhật giá vàng.";
   }
@@ -146,6 +146,19 @@ async function controlCounter(action, counterKey) {
   }
 }
 
+// Menu tùy chọn tra cứu thông tin khi gõ /thongtin
+function getInfoMenuKeyboard() {
+  return {
+    inline_keyboard: [
+      [{ text: "🌤️ Thời tiết TP. Vinh", callback_data: "info_weather" }],
+      [{ text: "🪙 Giá Bitcoin hôm nay", callback_data: "info_btc" }],
+      [{ text: "🏆 Giá Vàng Việt Nam", callback_data: "info_gold" }],
+      [{ text: "⏰ Nhắc nhở / Bấm số khám bệnh", callback_data: "info_layso" }],
+      [{ text: "📊 Xem tất cả Bản tin tổng hợp", callback_data: "info_all" }]
+    ]
+  };
+}
+
 // --- TỰ ĐỘNG LẬP LỊCH BẢN TIN SÁNG LÚC 07:00 ---
 cron.schedule('0 7 * * *', async () => {
   if (!ADMIN_CHAT_ID) {
@@ -153,12 +166,10 @@ cron.schedule('0 7 * * *', async () => {
     return;
   }
 
-  // 1. Lấy thông tin tổng hợp
   const weatherText = await getWeatherVinh();
   const btcText = await getBitcoinPrice();
   const goldText = await getGoldPrice();
 
-  // 2. Tạo giao diện nút bấm lấy số đầu ngày
   const keyboard = {
     inline_keyboard: [
       [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
@@ -170,14 +181,13 @@ cron.schedule('0 7 * * *', async () => {
 
   const morningMessage = 
     "☀️ **BẢN TIN SÁNG & NHẮC NHỞ ĐẦU NGÀY** ☀️\n\n" +
-    "📍 **Thời tiết TP. Vinh - Nghệ An:**\n" + `${weatherText}\n\n` +
-    "📈 **Giá Bitcoin hôm nay:**\n" + `${btcText}\n\n` +
-    "🏆 **Giá Vàng tham khảo:**\n" + `${goldText}\n\n` +
+    `${weatherText}\n\n` +
+    `${btcText}\n\n` +
+    `${goldText}\n\n` +
     "───────────────────\n" +
     "⏰ **NHẮC NHỞ LẤY SỐ KHÁM BỆNH:**\n" +
     "Đã đến giờ mở sổ bấm số ngày mới. Bấm chọn đối tượng bên dưới để cấp số mở hàng:";
 
-  // Gửi bản tin qua Telegram
   await sendMessage(ADMIN_CHAT_ID, morningMessage, keyboard);
 }, {
   timezone: "Asia/Ho_Chi_Minh"
@@ -192,7 +202,39 @@ async function handleCallbackQuery(callbackQuery) {
     await axios.post(`${TELEGRAM_API}/answerCallbackQuery`, { callback_query_id: callbackQuery.id });
   } catch (e) {}
 
-  if (data.startsWith('layso_')) {
+  // Xử lý các nút bấm tra cứu thông tin
+  if (data === 'info_weather') {
+    await sendMessage(chatId, "⏳ Đang lấy thông tin thời tiết...");
+    const weather = await getWeatherVinh();
+    await sendMessage(chatId, weather);
+  } else if (data === 'info_btc') {
+    await sendMessage(chatId, "⏳ Đang tra cứu giá Bitcoin...");
+    const btc = await getBitcoinPrice();
+    await sendMessage(chatId, btc);
+  } else if (data === 'info_gold') {
+    await sendMessage(chatId, "⏳ Đang tra cứu giá Vàng...");
+    const gold = await getGoldPrice();
+    await sendMessage(chatId, gold);
+  } else if (data === 'info_layso') {
+    const keyboard = {
+      inline_keyboard: [
+        [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
+        [{ text: "💵 Viện phí (dept_vp)", callback_data: "layso_dept_vp" }],
+        [{ text: "⭐ Khám theo yêu cầu (dept_yc)", callback_data: "layso_dept_yc" }],
+        [{ text: "❤️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
+      ]
+    };
+    await sendMessage(chatId, "⏰ **BẤM SỐ KHÁM BỆNH:** Vui lòng chọn đối tượng bên dưới:", keyboard);
+  } else if (data === 'info_all') {
+    await sendMessage(chatId, "⏳ Đang tổng hợp bản tin...");
+    const weather = await getWeatherVinh();
+    const btc = await getBitcoinPrice();
+    const gold = await getGoldPrice();
+    const fullMsg = `📊 **BẢN TIN TỔNG HỢP HÔM NAY**\n\n${weather}\n\n${btc}\n\n${gold}`;
+    await sendMessage(chatId, fullMsg);
+  }
+  // Xử lý các nút bấm lấy số
+  else if (data.startsWith('layso_')) {
     const deptId = data.replace('layso_', '');
     await sendMessage(chatId, "⏳ Đang cấp số thứ tự...");
     const result = await createTicket(deptId);
@@ -207,7 +249,9 @@ async function handleCallbackQuery(callbackQuery) {
     } else {
       await sendMessage(chatId, "❌ Không thể lấy số. Kiểm tra lại kết nối máy chủ.");
     }
-  } else if (data.startsWith('goiso_')) {
+  } 
+  // Xử lý các nút bấm gọi số
+  else if (data.startsWith('goiso_')) {
     const counterKey = data.replace('goiso_', '');
     await sendMessage(chatId, `⏳ Đang gọi số cho quầy [${counterKey}]...`);
     const res = await controlCounter('call-next', counterKey);
@@ -240,9 +284,16 @@ app.post('/webhook', async (req, res) => {
     if (userText.startsWith('/start')) {
       await sendMessage(
         chatId, 
-        `👋 Chào bạn! Chat ID của bạn là: \`${chatId}\`\n\n` +
-        "• Dùng lệnh `/layso` để mở danh sách bấm số.\n" +
-        "• Dùng lệnh `/goiso` để mở danh sách gọi số."
+        `👋 **TRỢ LÝ AI - CỦA NGỮ**\n\n` +
+        "• Gõ `/thongtin` để xem Menu tra cứu Thời tiết, Bitcoin, Giá vàng & Lấy số.\n" +
+        "• Gõ `/layso` để mở nhanh danh sách bấm số.\n" +
+        "• Gõ `/goiso` để mở menu gọi số quầy màn hình."
+      );
+    } else if (userText.startsWith('/thongtin')) {
+      await sendMessage(
+        chatId, 
+        "📌 **BẠN CẦN TRA CỨU THÔNG TIN NÀO?**\nHãy chọn một trong các mục bên dưới:", 
+        getInfoMenuKeyboard()
       );
     } else if (userText.startsWith('/layso')) {
       const param = userText.replace('/layso', '').trim();
