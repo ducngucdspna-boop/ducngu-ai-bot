@@ -7,13 +7,8 @@ const Parser = require('rss-parser');
 const app = express();
 app.use(express.json());
 
-// Khởi tạo RSS Parser với Timeout 5000ms (5 giây) để tránh bị treo
 const parser = new Parser({
-  timeout: 5000,
-  headers: {
-    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
-    'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8'
-  }
+  timeout: 5000
 });
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
@@ -90,10 +85,20 @@ async function askGroq(promptText) {
   }
 }
 
-// --- HÀM LẤY TIN TỨC AN TOÀN CHỐNG HẰNG HỌC / TREO ---
+// --- HÀM LẤY TIN TỨC CHUYÊN DỤNG (XỬ LÝ RIÊNG BẢO MẬT CỦA 24H) ---
 async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
   try {
-    const feed = await parser.parseURL(rssUrl);
+    // Dùng Axios fetch trực tiếp XML kèm Headers đầy đủ để vượt tường lửa 24h
+    const response = await axios.get(rssUrl, {
+      timeout: 7000,
+      headers: {
+        'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/122.0.0.0 Safari/537.36',
+        'Accept': 'text/html,application/xhtml+xml,application/xml;q=0.9,image/webp,*/*;q=0.8',
+        'Accept-Language': 'vi-VN,vi;q=0.9,en-US;q=0.8,en;q=0.7'
+      }
+    });
+
+    const feed = await parser.parseStringPromise(response.data);
     let resultText = `📰 **TIN MỚI TỪ ${sourceName.toUpperCase()}**:\n`;
     const items = feed.items ? feed.items.slice(0, limit) : [];
     
@@ -110,15 +115,15 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
     return resultText;
   } catch (error) {
     console.error(`Lỗi đọc tin từ ${sourceName}:`, error.message);
-    return `⚠️ Không thể lấy tin từ ${sourceName} (Lỗi/Timeout).`;
+    return `⚠️ Không thể lấy tin từ ${sourceName}.`;
   }
 }
 
 async function getAllLatestNews() {
-  // Lấy dữ liệu song song từ cả 3 trang báo, trang nào chậm/lỗi tự động ngắt sau 5s
   const [vnexpress, dantri, h24] = await Promise.allSettled([
     getNewsFromSource('https://vnexpress.net/rss/tin-moi-nhat.rss', 'VnExpress', 3),
     getNewsFromSource('https://dantri.com.vn/rss/home.rss', 'Dân Trí', 3),
+    // Link RSS trang chủ ổn định của 24h
     getNewsFromSource('https://cdn.24h.com.vn/upload/rss/trangchu24h.rss', '24h.com.vn', 3)
   ]);
 
