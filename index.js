@@ -18,12 +18,14 @@ const parser = new Parser({
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const TELEGRAM_API = `https://pharmacology-meetup-capabilities-visual.trycloudflare.com`;
 
-// ⚠️ CẬP NHẬT LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY BẠN
+// 🟢 ĐÃ SỬA: Đường dẫn Chuẩn API của Telegram Bot (dùng TELEGRAM_TOKEN)
+const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
+
+// ⚠️ CẬP NHẬT LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY BẠN (Dành cho HIS Server)
 const HIS_BASE_URL = 'https://strict-perfectly-marks-room.trycloudflare.com';
 
-// ID Chat Telegram của Bạn để nhận bản tin & nhắc nhở
+// ID Chat Telegram của Bệnh viện / Quản trị viên để nhận bản tin & nhắc nhở
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
 
 // Danh sách mã quầy tương ứng với từng hình thức khám
@@ -212,7 +214,7 @@ async function getGoldPrice() {
   try {
     const prompt = "Hãy tổng hợp ngắn gọn giá vàng SJC / PNJ mới nhất hôm nay tại Việt Nam. Chỉ đưa ra con số Mua vào - Bán ra ước tính trong 2 dòng, không giải thích dài dòng.";
     const result = await askGroq(prompt);
-    return `🏆 **Giá Vàng hôm nay tại Việt Nam:**\n${result.text || "⚠️ Chưa cập nhật được giá vàng."}`;
+    return `🏆 **Giá Vàng hôm nay tại Việt Nam:**\n${result.text || "⚠️️ Chưa cập nhật được giá vàng."}`;
   } catch (e) {
     return "⚠️ Lỗi cập nhật giá vàng.";
   }
@@ -383,7 +385,7 @@ app.post('/webhook', async (req, res) => {
     if (userText.startsWith('/start')) {
       await sendMessage(
         chatId, 
-        `👋 **TRỢ LÝ AI - CỦA NGỮ**\n\n` +
+        `👋 **TRỢ LÝ AI - HỆ THỐNG LẤY SỐ KHÁM BỆNH**\n\n` +
         "• Gõ `/thongtin1` để xem tin tức nóng nhất từ 24h, Dân Trí, VnExpress.\n" +
         "• Gõ `/thongtin` để xem Menu tra cứu Thời tiết, Bitcoin, Giá vàng & Lấy số.\n" +
         "• Gõ `/layso` để mở nhanh danh sách bấm số.\n" +
@@ -407,7 +409,7 @@ app.post('/webhook', async (req, res) => {
             [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
             [{ text: "💵 Viện phí (dept_vp)", callback_data: "layso_dept_vp" }],
             [{ text: "⭐ Khám theo yêu cầu (dept_yc)", callback_data: "layso_dept_yc" }],
-            [{ text: "❤️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
+            [{ text: "❤️️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
           ]
         };
         await sendMessage(chatId, "🏥 **CHỌN ĐỐI TƯỢNG ĐỂ BẤM LẤY SỐ:**", keyboard);
