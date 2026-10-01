@@ -18,7 +18,7 @@ const parser = new Parser({
 
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
-const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
+const TELEGRAM_API = `https://pharmacology-meetup-capabilities-visual.trycloudflare.com`;
 
 // ⚠️ CẬP NHẬT LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY BẠN
 const HIS_BASE_URL = 'https://strict-perfectly-marks-room.trycloudflare.com';
