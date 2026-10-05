@@ -27,7 +27,7 @@ const HIS_BASE_URL = 'https://tied-discounted-engineer-suspected.trycloudflare.c
 
 // Mã Kiosk và Mật khẩu Kiosk cài đặt trên Admin HIS
 const KIOSK_CODE = process.env.KIOSK_CODE || 'quay01';
-const KIOSK_PASSWORD = process.env.KIOSK_PASSWORD || '123456'; // <--- Bổ sung Mật khẩu Kiosk
+const KIOSK_PASSWORD = process.env.KIOSK_PASSWORD || '68686868'; // <--- Bổ sung Mật khẩu Kiosk
 
 // ID Chat Telegram của Bệnh viện / Quản trị viên để nhận bản tin & nhắc nhở
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
