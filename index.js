@@ -25,8 +25,9 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 // LINK CLOUDFLARE TUNNEL (HIS Server)
 const HIS_BASE_URL = 'https://tied-discounted-engineer-suspected.trycloudflare.com';
 
-// Mã Kiosk cài đặt trên Admin HIS (Mặc định 'quay01' hoặc lấy từ biến môi trường)
+// Mã Kiosk và Mật khẩu Kiosk cài đặt trên Admin HIS
 const KIOSK_CODE = process.env.KIOSK_CODE || 'quay01';
+const KIOSK_PASSWORD = process.env.KIOSK_PASSWORD || '123456'; // <--- Bổ sung Mật khẩu Kiosk
 
 // ID Chat Telegram của Bệnh viện / Quản trị viên để nhận bản tin & nhắc nhở
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
@@ -184,7 +185,7 @@ async function getWeatherVinh() {
     if (weather) {
       return `🌤️ **Thời tiết TP. Vinh - Nghệ An:**\n• Nhiệt độ: **${weather.temperature}°C**\n• Tốc độ gió: **${weather.windspeed} km/h**`;
     }
-    return "⚠️ Không thể lấy thông tin thời tiết.";
+    return "⚠️️ Không thể lấy thông tin thời tiết.";
   } catch (e) {
     return "⚠️ Lỗi kết nối thời tiết.";
   }
@@ -216,35 +217,62 @@ async function getGoldPrice() {
   }
 }
 
-// --- API LẤY SỐ MỚI & ĐIỀU KHIỂN QUẦY (ĐÃ TỰ ĐỘNG UNLOCK KIOSK) ---
+// --- API LẤY SỐ MỚI (ĐÃ CẬP NHẬT XỬ LÝ BẢO MẬT KIOSK SECURITY) ---
 async function createTicket(departmentId) {
   try {
-    const headers = { 'Content-Type': 'application/json' };
+    let kioskToken = null;
 
-    // 1. Tự động mở khóa lấy Kiosk Token từ hệ thống HIS
+    // 1. Gọi Unlock Kiosk kèm Code & Password
     try {
       const unlockRes = await axios.post(
         `${HIS_BASE_URL}/api/kiosk/unlock`,
-        { code: KIOSK_CODE },
-        { timeout: 5000 }
+        { 
+          code: KIOSK_CODE,
+          kioskCode: KIOSK_CODE,
+          password: KIOSK_PASSWORD 
+        },
+        { 
+          headers: { 'Content-Type': 'application/json' },
+          timeout: 5000 
+        }
       );
-      if (unlockRes.data?.token) {
-        headers['X-Kiosk-Token'] = unlockRes.data.token;
-      }
+
+      kioskToken = unlockRes.data?.token || unlockRes.data?.data?.token || unlockRes.data?.access_token;
+      console.log("🔓 Mở khóa Kiosk thành công. Token:", kioskToken ? "Đã lấy thành công" : "Không tìm thấy token trong kết quả");
     } catch (e) {
-      console.warn("Mở khóa Kiosk không thành công hoặc Kiosk Security đang tắt:", e.message);
+      console.warn("⚠️ Mở khóa Kiosk thất bại:", e.response?.data || e.message);
     }
 
-    // 2. Gửi yêu cầu lấy số kèm Token
+    // 2. Chuẩn bị Header & Body cho Yêu cầu Cấp số
+    const headers = { 'Content-Type': 'application/json' };
+    const bodyPayload = { 
+      departmentId,
+      kioskCode: KIOSK_CODE
+    };
+
+    if (kioskToken) {
+      headers['X-Kiosk-Token'] = kioskToken;
+      headers['Authorization'] = `Bearer ${kioskToken}`;
+      headers['token'] = kioskToken;
+      
+      bodyPayload.kioskToken = kioskToken;
+      bodyPayload.token = kioskToken;
+    }
+
+    // 3. Gửi Yêu cầu Lấy số
     const res = await axios.post(
       `${HIS_BASE_URL}/api/tickets`,
-      { departmentId },
+      bodyPayload,
       { headers, timeout: 10000 }
     );
+
     return res.data;
   } catch (error) {
-    console.error("Lỗi POST /api/tickets:", error.response?.data || error.message);
-    return null;
+    console.error("❌ Lỗi POST /api/tickets:", error.response?.data || error.message);
+    return {
+      error: true,
+      message: error.response?.data?.message || error.response?.data?.error || error.message
+    };
   }
 }
 
@@ -294,7 +322,7 @@ cron.schedule('0 7 * * *', async () => {
   };
 
   const morningMessage = 
-    "☀️ **BẢN TIN SÁNG & NHẮC NHỞ ĐẦU NGÀY** ☀️\n\n" +
+    "☀️️ **BẢN TIN SÁNG & NHẮC NHỞ ĐẦU NGÀY** ☀️\n\n" +
     `${weatherText}\n\n` +
     `${btcText}\n\n` +
     `${goldText}\n\n` +
@@ -356,7 +384,8 @@ async function handleCallbackQuery(callbackQuery) {
     const deptId = data.replace('layso_', '');
     await sendMessage(chatId, "⏳ Đang cấp số thứ tự...");
     const result = await createTicket(deptId);
-    if (result && result.code) {
+
+    if (result && !result.error && result.code) {
       await sendMessage(
         chatId,
         `🎉 **CẤP SỐ THÀNH CÔNG!**\n\n` +
@@ -365,7 +394,8 @@ async function handleCallbackQuery(callbackQuery) {
         `👥 **Đang chờ phía trước:** \`${result.waitingAhead || 0}\` người`
       );
     } else {
-      await sendMessage(chatId, "❌ Không thể lấy số. Kiểm tra lại kết nối máy chủ.");
+      const errMsg = result?.message ? `\n*Lỗi từ máy chủ:* \`${result.message}\`` : '';
+      await sendMessage(chatId, `❌ Không thể lấy số.${errMsg}\nKiểm tra lại cài đặt Mật khẩu/Mã Kiosk.`);
     }
   } 
   // Xử lý các nút bấm gọi số
@@ -432,10 +462,11 @@ app.post('/webhook', async (req, res) => {
         await sendMessage(chatId, "🏥 **CHỌN ĐỐI TƯỢNG ĐỂ BẤM LẤY SỐ:**", keyboard);
       } else {
         const result = await createTicket(param);
-        if (result && result.code) {
+        if (result && !result.error && result.code) {
           await sendMessage(chatId, `🎉 **CẤP SỐ THÀNH CÔNG!** Số: \`${result.code}\``);
         } else {
-          await sendMessage(chatId, "❌ Lỗi cấp số.");
+          const errMsg = result?.message ? ` (${result.message})` : '';
+          await sendMessage(chatId, `❌ Lỗi cấp số${errMsg}.`);
         }
       }
     } else if (userText.startsWith('/goiso')) {
