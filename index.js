@@ -19,11 +19,14 @@ const parser = new Parser({
 const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
-// 🟢 ĐÃ SỬA: Đường dẫn Chuẩn API của Telegram Bot (dùng TELEGRAM_TOKEN)
+// Đường dẫn Chuẩn API của Telegram Bot
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 
-// ⚠️ CẬP NHẬT LINK CLOUDFLARE TUNNEL ĐANG CHẠY TRÊN MÁY BẠN (Dành cho HIS Server)
+// LINK CLOUDFLARE TUNNEL (HIS Server)
 const HIS_BASE_URL = 'https://tied-discounted-engineer-suspected.trycloudflare.com';
+
+// Mã Kiosk cài đặt trên Admin HIS (Mặc định 'quay01' hoặc lấy từ biến môi trường)
+const KIOSK_CODE = process.env.KIOSK_CODE || 'quay01';
 
 // ID Chat Telegram của Bệnh viện / Quản trị viên để nhận bản tin & nhắc nhở
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
@@ -92,12 +95,11 @@ async function askGroq(promptText) {
   }
 }
 
-// --- HÀM LẤY TIN TỨC AN TOÀN CHỐNG HẰNG HỌC / TREO (ĐÃ ĐƯỢC CẬP NHẬT CHO 24H) ---
+// --- HÀM LẤY TIN TỨC AN TOÀN ---
 async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
   try {
     let feed;
 
-    // Xử lý riêng cho 24h.com.vn bằng Axios để tránh bị chặn IP/Header
     if (rssUrl.includes('24h.com.vn')) {
       const response = await axios.get(rssUrl, {
         timeout: 5000,
@@ -110,7 +112,6 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
       });
       feed = await parser.parseStringPromise(response.data);
     } else {
-      // Các trang VnExpress, Dân Trí dùng parseURL chuẩn
       feed = await parser.parseURL(rssUrl);
     }
 
@@ -131,7 +132,6 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
   } catch (error) {
     console.error(`Lỗi đọc tin từ ${sourceName}:`, error.message);
 
-    // Dự phòng đường dẫn RSS phụ của 24h trong trường hợp luồng chính bị lỗi
     if (rssUrl.includes('24h.com.vn')) {
       try {
         const fallbackRes = await axios.get('https://cdn.24h.com.vn/upload/rss/tintuctrongngay.rss', {
@@ -157,7 +157,6 @@ async function getNewsFromSource(rssUrl, sourceName, limit = 3) {
 }
 
 async function getAllLatestNews() {
-  // Lấy dữ liệu song song từ cả 3 trang báo, trang nào chậm/lỗi tự động ngắt sau 5s
   const [vnexpress, dantri, h24] = await Promise.allSettled([
     getNewsFromSource('https://vnexpress.net/rss/tin-moi-nhat.rss', 'VnExpress', 3),
     getNewsFromSource('https://dantri.com.vn/rss/home.rss', 'Dân Trí', 3),
@@ -177,7 +176,6 @@ async function getAllLatestNews() {
 
 // --- HÀM LẤY THÔNG TIN THỜI TIẾT, BITCOIN, GIÁ VÀNG ---
 
-// 1. Lấy thời tiết TP. Vinh (Open-Meteo API)
 async function getWeatherVinh() {
   try {
     const url = 'https://api.open-meteo.com/v1/forecast?latitude=18.6734&longitude=105.6923&current_weather=true&timezone=Asia%2FHo_Chi_Minh';
@@ -192,7 +190,6 @@ async function getWeatherVinh() {
   }
 }
 
-// 2. Lấy giá Bitcoin (CoinGecko API)
 async function getBitcoinPrice() {
   try {
     const url = 'https://api.coingecko.com/api/v3/simple/price?ids=bitcoin&vs_currencies=usd,vnd';
@@ -209,24 +206,44 @@ async function getBitcoinPrice() {
   }
 }
 
-// 3. Lấy giá Vàng tại Việt Nam (AI Tra cứu)
 async function getGoldPrice() {
   try {
     const prompt = "Hãy tổng hợp ngắn gọn giá vàng SJC / PNJ mới nhất hôm nay tại Việt Nam. Chỉ đưa ra con số Mua vào - Bán ra ước tính trong 2 dòng, không giải thích dài dòng.";
     const result = await askGroq(prompt);
-    return `🏆 **Giá Vàng hôm nay tại Việt Nam:**\n${result.text || "⚠️️ Chưa cập nhật được giá vàng."}`;
+    return `🏆 **Giá Vàng hôm nay tại Việt Nam:**\n${result.text || "⚠ Chưa cập nhật được giá vàng."}`;
   } catch (e) {
     return "⚠️ Lỗi cập nhật giá vàng.";
   }
 }
 
-// --- API LẤY SỐ MỚI & ĐIỀU KHIỂN QUẦY ---
+// --- API LẤY SỐ MỚI & ĐIỀU KHIỂN QUẦY (ĐÃ TỰ ĐỘNG UNLOCK KIOSK) ---
 async function createTicket(departmentId) {
   try {
-    const res = await axios.post(`${HIS_BASE_URL}/api/tickets`, { departmentId }, { timeout: 10000 });
+    const headers = { 'Content-Type': 'application/json' };
+
+    // 1. Tự động mở khóa lấy Kiosk Token từ hệ thống HIS
+    try {
+      const unlockRes = await axios.post(
+        `${HIS_BASE_URL}/api/kiosk/unlock`,
+        { code: KIOSK_CODE },
+        { timeout: 5000 }
+      );
+      if (unlockRes.data?.token) {
+        headers['X-Kiosk-Token'] = unlockRes.data.token;
+      }
+    } catch (e) {
+      console.warn("Mở khóa Kiosk không thành công hoặc Kiosk Security đang tắt:", e.message);
+    }
+
+    // 2. Gửi yêu cầu lấy số kèm Token
+    const res = await axios.post(
+      `${HIS_BASE_URL}/api/tickets`,
+      { departmentId },
+      { headers, timeout: 10000 }
+    );
     return res.data;
   } catch (error) {
-    console.error("Lỗi POST /api/tickets:", error.message);
+    console.error("Lỗi POST /api/tickets:", error.response?.data || error.message);
     return null;
   }
 }
@@ -357,7 +374,7 @@ async function handleCallbackQuery(callbackQuery) {
     await sendMessage(chatId, `⏳ Đang gọi số cho quầy [${counterKey}]...`);
     const res = await controlCounter('call-next', counterKey);
     if (res?.data?.empty) {
-      await sendMessage(chatId, `⚠️ **Hàng đợi trống!** Không có bệnh nhân nào đang chờ.`);
+      await sendMessage(chatId, `⚠️ **HÀNG ĐỢI TRỐNG!** Không có bệnh nhân nào đang chờ.`);
     } else if (res?.data?.ticket) {
       await sendMessage(chatId, `📢 **ĐÃ GỌI SỐ:** \`${res.data.ticket.code}\` lên màn hình quầy \`${res.counterId}\`!`);
     } else {
@@ -409,7 +426,7 @@ app.post('/webhook', async (req, res) => {
             [{ text: "🛡️ Bảo hiểm y tế (dept_bh)", callback_data: "layso_dept_bh" }],
             [{ text: "💵 Viện phí (dept_vp)", callback_data: "layso_dept_vp" }],
             [{ text: "⭐ Khám theo yêu cầu (dept_yc)", callback_data: "layso_dept_yc" }],
-            [{ text: "❤️️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
+            [{ text: "❤️ Ưu tiên (dept_ut)", callback_data: "layso_dept_ut" }]
           ]
         };
         await sendMessage(chatId, "🏥 **CHỌN ĐỐI TƯỢNG ĐỂ BẤM LẤY SỐ:**", keyboard);
