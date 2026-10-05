@@ -23,7 +23,7 @@ const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
 const HIS_BASE_URL = 'https://tied-discounted-engineer-suspected.trycloudflare.com';
 
 const KIOSK_CODE = process.env.KIOSK_CODE || 'quay01';
-const KIOSK_PASSWORD = process.env.KIOSK_PASSWORD || '123456';
+const KIOSK_PASSWORD = process.env.KIOSK_PASSWORD || '68686868';
 const ADMIN_CHAT_ID = process.env.ADMIN_CHAT_ID || '';
 
 // Biến điều khiển lấy số tự động
