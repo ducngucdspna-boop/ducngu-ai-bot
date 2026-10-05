@@ -127,8 +127,14 @@ async function getAllLatestNews() {
     getNewsFromSource('https://cdn.24h.com.vn/upload/rss/tintuctrongngay.rss', '24h.com.vn', 3)
   ]);
 
+  const vnVal = vnexpress.status === 'fulfilled' ? vnexpress.value : '';
+  const dtVal = dantri.status === 'fulfilled' ? dantri.value : '';
+  const h24Val = h24.status === 'fulfilled' ? h24.value : '';
+
   return `🔥 **CẬP NHẬT TIN TỨC NỔI BẬT HÔM NAY** 🔥\n\n` +
-         `${vnexpress.value || ''}\n\n${dantri.value \vert{}\vert{} ''}\n\n${h24.value || ''}\n\n` +
+         (vnVal ? `${vnVal}\n\n` : '') +
+         (dtVal ? `${dtVal}\n\n` : '') +
+         (h24Val ? `${h24Val}\n\n` : '') +
          `👉 *Bấm vào tiêu đề để xem bài viết chi tiết!*`;
 }
 
@@ -307,7 +313,7 @@ async function handleCallbackQuery(callbackQuery) {
     if (res?.data?.ticket) {
       await sendMessage(chatId, `📢 **ĐÃ GỌI SỐ:** \`${res.data.ticket.code}\`!`);
     } else {
-      await sendMessage(chatId, "⚠️️ Hàng đợi trống hoặc không thể gọi.");
+      await sendMessage(chatId, "⚠️ Hàng đợi trống hoặc không thể gọi.");
     }
   }
 }
@@ -346,7 +352,7 @@ app.post('/webhook', async (req, res) => {
         return;
       }
 
-      await sendMessage(chatId, "🤖 **ĐÃ BẬT TỰ ĐỘNG LẤY SỐ!**\nCứ **1 phút/lần** bot sẽ lần lượt bấm số cho: *BHYT $\rightarrow$ Viện phí $\rightarrow$ Khám yêu cầu $\rightarrow$ Ưu tiên*.\nGõ `/duntudong` để dừng.");
+      await sendMessage(chatId, "🤖 **ĐÃ BẬT TỰ ĐỘNG LẤY SỐ!**\nCứ **1 phút/lần** bot sẽ lần lượt bấm số cho: *BHYT -> Viện phí -> Khám yêu cầu -> Ưu tiên*.\nGõ `/duntudong` để dừng.");
 
       currentDeptIndex = 0;
       autoTicketInterval = setInterval(async () => {
