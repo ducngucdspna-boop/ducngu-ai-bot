@@ -348,7 +348,7 @@ app.post('/webhook', async (req, res) => {
     // --- LỆNH TỰ ĐỘNG LẤY SỐ XOAY VÒNG 1 PHÚT/LẦN ---
     else if (userText.startsWith('/tudong')) {
       if (autoTicketInterval) {
-        await sendMessage(chatId, "⚠️ **Chế độ tự động lấy số ĐANG CHẠY RỒI!**\nGõ `/duntudong` để dừng lại.");
+        await sendMessage(chatId, "⚠️ **Chế độ tự động lấy số ĐANG CHẠY RỒI!**\nGõ `/dungtudong` để dừng lại.");
         return;
       }
 
