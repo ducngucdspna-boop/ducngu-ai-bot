@@ -341,7 +341,7 @@ app.post('/webhook', async (req, res) => {
         "• `/thongtin` : Menu Tin tức, Thời tiết, Giá vàng.\n" +
         "• `/layso` : Danh sách đối tượng lấy số thủ công.\n" +
         "• `/tudong` : 🤖 **Bật chế độ tự động lấy số 1 phút/lần xoay vòng**.\n" +
-        "• `/duntudong` : 🛑 **Dừng lấy số tự động**.\n" +
+        "• `/dungtudong` : 🛑 **Dừng lấy số tự động**.\n" +
         "• `/goiso` : Menu gọi số quầy."
       );
     } 
@@ -377,7 +377,7 @@ app.post('/webhook', async (req, res) => {
       }, 60000); // 60000 ms = 1 phút
     } 
     // --- LỆNH DỪNG LẤY SỐ TỰ ĐỘNG ---
-    else if (userText.startsWith('/duntudong') || userText.startsWith('/stoptudong')) {
+    else if (userText.startsWith('/dungtudong') || userText.startsWith('/stoptudong')) {
       if (autoTicketInterval) {
         clearInterval(autoTicketInterval);
         autoTicketInterval = null;
