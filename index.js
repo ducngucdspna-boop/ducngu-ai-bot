@@ -176,6 +176,26 @@ async function getGoldPrice() {
   }
 }
 
+// --- HÀM KÍCH HOẠT LỆNH IN PHIẾU ĐỘC LẬP TẠI MÁY LOCAL ---
+async function triggerPrintTicket(ticketId, kioskToken) {
+  if (!ticketId) return;
+  try {
+    const headers = { 'Content-Type': 'application/json' };
+    if (kioskToken) {
+      headers['X-Kiosk-Token'] = kioskToken;
+      headers['Authorization'] = `Bearer ${kioskToken}`;
+    }
+    await axios.post(
+      `${HIS_BASE_URL}/api/tickets/${ticketId}/print`,
+      { kioskCode: KIOSK_CODE, print: true },
+      { headers, timeout: 5000 }
+    );
+    console.log(`[PRINT] Đã gửi lệnh in thành công cho phiếu ID: ${ticketId}`);
+  } catch (err) {
+    console.warn("Kích hoạt máy in local thất bại:", err.response?.data || err.message);
+  }
+}
+
 // --- API LẤY SỐ KHÁM BỆNH ---
 async function createTicket(departmentId) {
   try {
@@ -193,7 +213,15 @@ async function createTicket(departmentId) {
     }
 
     const headers = { 'Content-Type': 'application/json' };
-    const bodyPayload = { departmentId, kioskCode: KIOSK_CODE };
+    
+    // Tích hợp tham số tự động in phiếu vào Body Payload
+    const bodyPayload = { 
+      departmentId, 
+      kioskCode: KIOSK_CODE,
+      accessCode: KIOSK_PASSWORD,
+      print: true,
+      autoPrint: true
+    };
 
     if (kioskToken) {
       headers['X-Kiosk-Token'] = kioskToken;
@@ -204,12 +232,19 @@ async function createTicket(departmentId) {
     }
 
     const res = await axios.post(
-      `${HIS_BASE_URL}/api/tickets`,
+      `${HIS_BASE_URL}/api/tickets?token=${kioskToken || ''}&accessCode=${KIOSK_PASSWORD}`,
       bodyPayload,
       { headers, timeout: 10000 }
     );
 
-    return res.data;
+    const ticketData = res.data;
+
+    // Nếu tạo phiếu thành công, kích hoạt thêm API in riêng biệt nếu máy local yêu cầu
+    if (ticketData && !ticketData.error && (ticketData.id || ticketData.ticketId)) {
+      triggerPrintTicket(ticketData.id || ticketData.ticketId, kioskToken);
+    }
+
+    return ticketData;
   } catch (error) {
     return {
       error: true,
@@ -300,10 +335,10 @@ async function handleCallbackQuery(callbackQuery) {
     await sendMessage(chatId, `📊 **BẢN TIN TỔNG HỢP HÔM NAY**\n\n${weather}\n\n${btc}\n\n${goldText}`);
   } else if (data.startsWith('layso_')) {
     const deptId = data.replace('layso_', '');
-    await sendMessage(chatId, "⏳ Đang cấp số thứ tự...");
+    await sendMessage(chatId, "⏳ Đang cấp số thứ tự và in phiếu...");
     const result = await createTicket(deptId);
     if (result && !result.error && result.code) {
-      await sendMessage(chatId, `🎉 **CẤP SỐ THÀNH CÔNG!**\n🏥 Đối tượng: ${result.departmentName || deptId}\n🔢 Số: \`${result.code}\``);
+      await sendMessage(chatId, `🎉 **CẤP SỐ THÀNH CÔNG!**\n🏥 Đối tượng: ${result.departmentName || deptId}\n🔢 Số: \`${result.code}\`\n🖨️ *Đã gửi lệnh in ra máy in!*`);
     } else {
       await sendMessage(chatId, `❌ Lỗi cấp số: ${result?.message || 'Không kết nối được HIS'}`);
     }
@@ -352,7 +387,7 @@ app.post('/webhook', async (req, res) => {
         return;
       }
 
-      await sendMessage(chatId, "🤖 **ĐÃ BẬT TỰ ĐỘNG LẤY SỐ!**\nCứ **1 phút/lần** bot sẽ lần lượt bấm số cho: *BHYT -> Viện phí -> Khám yêu cầu -> Ưu tiên*.\nGõ `/duntudong` để dừng.");
+      await sendMessage(chatId, "🤖 **ĐÃ BẬT TỰ ĐỘNG LẤY SỐ!**\nCứ **1 phút/lần** bot sẽ lần lượt bấm số cho: *BHYT -> Viện phí -> Khám yêu cầu -> Ưu tiên*.\nGõ `/dungtudong` để dừng.");
 
       currentDeptIndex = 0;
       autoTicketInterval = setInterval(async () => {
@@ -366,7 +401,8 @@ app.post('/webhook', async (req, res) => {
             `🤖 **[TỰ ĐỘNG LẤY SỐ] SUCCESS!**\n\n` +
             `🏥 **Đối tượng:** ${targetDept.name}\n` +
             `🔢 **Số thứ tự:** \`${result.code}\`\n` +
-            `👥 **Đang chờ:** \`${result.waitingAhead || 0}\` người`
+            `👥 **Đang chờ:** \`${result.waitingAhead || 0}\` người\n` +
+            `🖨️ **Máy in:** Đã tự động in phiếu.`
           );
         } else {
           await sendMessage(chatId, `🤖 **[TỰ ĐỘNG LẤY SỐ] FAIL:** Không lấy được số cho *${targetDept.name}* (${result?.message || 'Lỗi connection'})`);
@@ -405,7 +441,7 @@ app.post('/webhook', async (req, res) => {
       } else {
         const result = await createTicket(param);
         if (result && !result.error && result.code) {
-          await sendMessage(chatId, `🎉 **CẤP SỐ THÀNH CÔNG!** Số: \`${result.code}\``);
+          await sendMessage(chatId, `🎉 **CẤP SỐ THÀNH CÔNG!** Số: \`${result.code}\`\n🖨️ *Đã gửi lệnh in phiếu!*`);
         } else {
           await sendMessage(chatId, `❌ Lỗi cấp số.`);
         }
