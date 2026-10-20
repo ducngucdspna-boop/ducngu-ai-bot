@@ -20,7 +20,7 @@ const TELEGRAM_TOKEN = process.env.TELEGRAM_TOKEN;
 const GROQ_API_KEY = process.env.GROQ_API_KEY;
 
 const TELEGRAM_API = `https://api.telegram.org/bot${TELEGRAM_TOKEN}`;
-const HIS_BASE_URL = 'https://several-authentic-loading-commitments.trycloudflare.com';
+const HIS_BASE_URL = 'https://announcement-architects-edward-benz.trycloudflare.com';
 
 const KIOSK_CODE = process.env.KIOSK_CODE || 'quay01';
 const KIOSK_PASSWORD = process.env.KIOSK_PASSWORD || '68686868';
